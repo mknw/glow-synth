@@ -17,12 +17,11 @@ from model import Glow
 from tqdm import tqdm
 # from train_r import calc_z_shapes
 from shell_util import AverageMeter, bits_per_dim
-from load_dataset import sample_from_directory
 
 
 def main(args):
 
-    device = torch.device("cuda" if torch.cuda.is_available() and len(args.gpu_ids) > 0 else "cpu")
+    device = torch.device("cuda:0" if torch.cuda.is_available() and len(args.gpu_ids) > 0 else "cpu")
     print("training on: %s" % device)
     start_epoch = 0
 
@@ -40,7 +39,6 @@ def main(args):
 
     if args.resume: # or not args.resume:
         # Load checkpoint.
-        # import pdb; pdb.set_trace()
         args.model_dir = find_last_model_relpath(args.root_dir) # /model_{str(i + 1).zfill(6)}.pt'
         print(f'Resuming from checkpoint at {args.model_dir}')
         checkpoint = torch.load(args.model_dir+'/model.pth.tar')
@@ -83,7 +81,13 @@ def train(args, net, device, optimizer, start_epoch):
     if args.dataset == 'celeba':
         dataset = iter(sample_celeba(args.batch, args.img_size))
     elif args.dataset == 'ffhq':
+        from load_dataset import sample_from_directory
         dataset = iter(sample_from_directory('data/FFHQ/images1024x1024', args.batch, args.img_size))
+    elif args.dataset == 'meyes':
+        from load_dataset import sample_FFHQ_eyes
+        from load_dataset import RandomRotatedResizedCrop as RRRC
+        dataset = iter(sample_FFHQ_eyes(args.batch, args.img_size, shuffle=True,
+                                        transform=RRRC(output_size=256)))
 
     n_bins = 2. ** args.n_bits
 
@@ -114,7 +118,7 @@ def train(args, net, device, optimizer, start_epoch):
             loss, log_p, log_det = calc_loss(log_p, logdet, args.img_size, n_bins)
             net.zero_grad()
             loss.backward()
-            # warmup_lr = args.lr * min(1, i * args.batch / (50000 * 10))
+            # warmup_lr = args.lr * min(1, i * batch_size / (50000 * 10))
             warmup_lr = args.lr
             optimizer.param_groups[0]['lr'] = warmup_lr
             optimizer.step()
@@ -134,16 +138,17 @@ def train(args, net, device, optimizer, start_epoch):
                                                  normalize=True,
                                                  nrow= int(args.num_sample ** 0.5),
                                                  range=(-0.5, 0.5))
+
                 with open(f'{args.root_dir}/log', 'a') as l:
                     report = f'{loss.item():.5f},{log_p.item():.5f},{log_det.item():.5f},{warmup_lr:.7f},{p_imgs}\n'
                     # print("Writing to disk: " + report + ">> {}/log".format(args.root_dir))
                     l.write(report)
 
-                model_dir = args.root_dir
-                if i % 10000 == 0:
-                    # TEST
-                    model_dir += f'/epoch_{str(i).zfill(6)}'
-                    os.makedirs(model_dir, exist_ok=True)
+
+            if i % 10000 == 0:
+                # TEST
+                model_dir = f'{args.root_dir}/epoch_{str(i).zfill(6)}'
+                os.makedirs(model_dir)
                 torch.save({'net': net.state_dict(),
                             'test_loss': loss_meter.avg,
                                         'epoch': i 
@@ -203,8 +208,6 @@ def find_or_make_z(path, C, img_size, n_flow, n_block, num_sample, t, device):
 
         torch.save(z_sample, path)
     return z_sample
-
-
 def calc_z_shapes(n_channel, input_size, n_flow, n_block):
     z_shapes = []
 
@@ -277,7 +280,6 @@ def test(epoch, net, testloader, device, loss_fn, **args):
         torch.save(state, save_dir + '/model.pth.tar')
         best_loss = loss_meter.avg
 
-    # import ipdb; ipdb.set_trace()
     sample_fields = ['num_samples', 'in_channels', 'resize_hw']
     images, latent_z = sample(net, device=device, **filter_args( args, fields=sample_fields ) )
 
@@ -333,8 +335,6 @@ class GaussianNoise(object):
         return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
 
 
-
-
 class Normie(object):
     '''class for normies'''
     def __init__(self, min, max):
@@ -347,7 +347,6 @@ class Normie(object):
         return tensor
 
 def find_last_model_relpath(fp):
-    # import pdb; pdb.set_trace()
 
     dirs_l = os.listdir(fp)
     samples_l = os.listdir(fp + '/samples')
@@ -360,34 +359,33 @@ def find_last_model_relpath(fp):
     else:
         return fp
 
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Glow model')
     parser.add_argument('--benchmark', action='store_true', help='Turn on CUDNN benchmarking')
     # parser.add_argument('--num_epochs', default=100, type=int, help='Number of epochs to train')
 
     # 1. Dataset : 'celeba', 'MNIST', 'CIFAR' (not tested)
-    dataset_ = 'ffhq'
+    dataset_ = 'meyes'
     # 2. Architecture
     net_ = 'glow'  # 2.
     # 3. Samples dir_
-    dir_ = net_ + '_' + dataset_
+    dir_ = net_ + '_' + dataset_ + '_2'
     # 4. GPUs
     gpus_ = '[0, 1]' # if net_ == 'densenet' and dataset_=='mnist'  else '[0]' # 4.
     # 5. resume training?
-    resume_ = True # 5.
+    resume_ = False # 5.
     # 6. learning_rate
-    if net_ == 'glow':
-        learning_rate_ = 2e-4
-    else:
-        learning_rate_ = 1e-4
+    learning_rate_ = 2e-4
     # 6. resize 
     if dataset_ == 'mnist':
         in_channels_= 1
-    elif dataset_ in ['celeba', 'ffhq']:
+    elif dataset_ in ['celeba', 'ffhq', 'meyes']:
         in_channels_= 3
         img_size_ = 256
         batch_size_ = 4
-        num_sample_ = 16
+        num_sample_ = 4
 
     root_dir_ = 'data/' + dir_
     
@@ -428,7 +426,7 @@ if __name__ == '__main__':
     parser.add_argument('--batch', default=batch_size_, type=int, help='Batch size')
     parser.add_argument('--root_dir', default=root_dir_, help="Directory for storing generated samples")
     parser.add_argument('--num_sample', default=num_sample_, type=int, help='Number of samples at test time')
-    parser.add_argument('--num_scales', default=num_scales_, type=int, help='Real NVP multi-scale arch. recursions')
+    # parser.add_argument('--num_scales', default=num_scales_, type=int, help='Real NVP multi-scale arch. recursions')
 
     
     best_loss = 5e5

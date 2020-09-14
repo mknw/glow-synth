@@ -59,7 +59,7 @@ def sample_FFHQ_eyes(batch, image_size, degrees=90, transform=None, shuffle=True
                     transforms.Normalize((0.5, 0.5, 0.5), (1, 1, 1)),
                 ])
     dataset = FFHQLandmarks(transform=transform)
-    loader = DataLoader(dataset, batch_size=batch, shuffle=shuffle, num_workers=0)
+    loader = DataLoader(dataset, batch_size=batch, shuffle=shuffle, num_workers=16)
     loader = iter(loader)
     
     while True:
@@ -130,68 +130,126 @@ class RandomRotatedResizedCrop(object):
         output_size (int): Desired output size in pixels.
     '''
 
-    def __init__(self, output_size, crop_margin = 20, degrees=90):
+    def __init__(self, output_size=256, crop_margin = 24, degrees=90):
         self.output_size = output_size # 256
         self.crop_margin = crop_margin
+        self.min_eyes_h = 20
+        self.num_rotations = (3, 5)
+        self.concentric_reps = 3
+
         self.to_tensor = transforms.ToTensor()
-        self.circular_reps = (2, 4)
-        self.concentric_reps = 2
-        print(f'PARAMS: crop_margin: {crop_margin}, circular reps: {self.circular_reps}', end='')
+        self.normalize = transforms.Normalize((0.5, 0.5, 0.5), (1, 1, 1))
+        # print(f'PARAMS: crop_margin: {crop_margin}, circular reps: {self.num_rotations}', end='')
 
     def __call__(self, input):
 
         bg = False
         input_image, input_eyes = input
+        inner_h = None
+        rot_params = None
+        in_deg = None
+
+        images = []; masks = []; eyes_l = []
 
         for cr in range(self.concentric_reps):
             # import ipdb; ipdb.set_trace()
 
             # copy and pad original image, take bbox coordinates
-            if not bg:
-                image, eyes, ratio, inner_h = self._preproc_resize(input_image.copy(),
-                                                             input_eyes.copy())
-                base_image, bbox_coords, eyes, in_deg = self._init_rotate(
-                                                            image.copy(), eyes, ratio)
-                base_image, mask, rot_params = self._rotate_and_composite_n(
-                                                          base_image, bbox_coords, bg)
-                # prev_rotation = (init_rot_params, rot_params)
-            else:
-                image, eyes, ratio = self._preproc_resize(input_image.copy(),
-                                                          input_eyes.copy(), inner_h)
-                base_image, bbox_coords, eyes = self._init_bg(image.copy(), eyes, ratio,
-                                                              in_deg, rot_params)
-                base_image, mask = self._rotate_and_composite_n(base_image, bbox_coords, bg, rot_params)
+            image, eyes, ratio, inner_h = self._preproc_resize(
+                                           input_image.copy(), input_eyes.copy(), inner_h)
 
-            if not bg:
-                fg_img = base_image.copy()
-                fg_mask = mask.copy()
-                fg_eyes = eyes.copy()
-            bg = True
+            base_image, eye_vertices, eyes, in_deg = self._init_rotate(
+                                           image.copy(), eyes, ratio, in_deg, rot_params)
+
+            base_image, mask, rot_params = self._rotate_and_composite_n(
+                                           base_image, eye_vertices, bg, rot_params)
+
+            images.append(base_image.copy())
+            masks.append(mask.copy())
+            eyes_l.append(eyes.copy())
 
         # crop background
-        base_image = self.crop_image(base_image)
+        base_image = images[0].copy()
+        fg_mask = masks[0].copy()
+        for i in range(self.concentric_reps-1):
+            bg_image = self.crop_image(images[i+1])
+            base_image = Image.composite(base_image, bg_image, fg_mask)
 
-        base_image = Image.composite(fg_img, base_image, fg_mask)
+            # if not i == self.concentric_reps-2:
+            fg_mask = Image.composite(fg_mask, self.crop_image(masks[i+1]), fg_mask)
 
-        print(base_image.size)
-        image = self.to_tensor(base_image) # mask.convert('RGB')) 
-        return image, fg_eyes
+        c = self.random_color()
+        base_image = Image.composite(base_image, Image.new('RGB', base_image.size, color=c), fg_mask)
+
+        # add 1 eye
+        image = self.add_eye(base_image, images[0], eyes_l)
+
+        # tensorization
+        image = self.to_tensor(image) # mask.convert('RGB')) 
+        image = self.normalize(image)
+        return image, eyes_l[0]
+    
+
+    def add_eye(self, base_image, source_image, eyes):
+        ''' add central eye '''
+
+        eye = eyes[0][random.randint(0, 1)].copy()
+
+        eye_center = np.array((eye[:, 0].min() + eye[:,0].max(),
+                               eye[:, 1].min() + eye[:,1].max())) / 2
+        m = 4
+
+        x_eye = [x + m if x > eye_center[0] else x - m for x in eye[:,0]]
+        y_eye = [y + m if y > eye_center[1] else y - m for y in eye[:,1]]
+        eye = np.stack([x_eye, y_eye], axis=1)
+
+        eye_bb = (eye[:, 0].min(), eye[:,1].min(),
+                  eye[:, 0].max(), eye[:,1].max())
+
+        eye_crop = source_image.crop(eye_bb)
+        eye[:, 0] -= eye_bb[0]
+        eye[:, 1] -= eye_bb[1]
+        # eye_center[0] -= eye_bb[0]
+        # eye_center[1] -= eye_bb[1]
+        # paste_xy = (128 - eye_center).astype(np.int8)
+
+        eye_mask = Image.new('L', size=eye_crop.size)
+        mask_draw = ImageDraw.Draw(eye_mask)
+        mask_draw.polygon([tuple(c) for c in eye], fill=255)
+
+        eye_crop.putalpha(eye_mask)
+        
+        # rotate eye (eye roll)
+        deg = random.randrange(-90, 90)
+        eye_crop = eye_crop.rotate(deg, expand=True)
+
+        paste_xy = tuple([int(128 - coord / 2) for coord in eye_crop.size])
+
+        base_image = base_image.convert('RGBA')
+        base_image.paste(eye_crop, paste_xy, eye_crop)
+        return base_image.convert('RGB')
+
+
+    def random_color(self):
+        levels = range(32, 256, 32)
+        return tuple(random.choice(levels) for _ in range(3))
     
     def bbox_measures(self, eyes, side):
         min_x, min_y, max_x, max_y = self.take_bbox(eyes, self.crop_margin)
         eyes_crop_h = max_y - min_y
         eyes_crop_w = max_x - min_x
-        diag = side * sqrt(2)
+        diag = self.output_size * sqrt(2)
 
         ## Resize by giving crop height.
         # max_h: H for crop with W spanning 256 px
         max_h = int(self.output_size * (eyes_crop_h / eyes_crop_w))
-        # diag_h: H for crop with W spanning `diag` pixels (~ 1448.15).
+        # diag_h: H for crop with W spanning `diag` pixels (~ 362).
         diag_h = int(diag * (eyes_crop_h / eyes_crop_w))
 
-        max_inner = int(self.crop_margin + max_h / 2)
-        max_outer = int(self.crop_margin + diag_h / 2)
+        max_inner = int(max_h / 2)
+        max_outer = int(diag_h / self.concentric_reps)
         crop_input = (min_y, min_x, eyes_crop_h, eyes_crop_w)
+        # return (max_inner, max_outer, crop_input)
         return (max_inner, max_outer, crop_input)
 
     def _preproc_resize(self, image, eyes, inner_h=None):
@@ -204,12 +262,13 @@ class RandomRotatedResizedCrop(object):
         max_inner, max_outer, crop_input = self.bbox_measures(eyes, image.height)
 
         if not inner_h: 
-            H = random.randint(self.crop_margin, max_inner) # + self.crop_margin)
-            print('inner range: ', self.crop_margin, max_inner, f'selected: {H}', end='')
+            if max_inner < self.min_eyes_h:
+                H = max_inner
+            else:
+                H = random.randint(self.min_eyes_h, max_inner) # + self.crop_margin)
         else:
             # = random.randint(max_inner, max_outer) # + self.crop_margin)
             H = inner_h * 2 # + 20
-            print(' | outer range: ', max_inner, max_outer, f'selected: {H}', end='')
 
         image = TF.resized_crop(image.copy(), *crop_input, H) # , min_y, min_x, eyes_crop_h, eyes_crop_w, random_h)
         # update landmarks coordinates against
@@ -218,33 +277,8 @@ class RandomRotatedResizedCrop(object):
         eyes[:,:,1] -= crop_input[0]    # <- min_y
         ratio = new_h / crop_input[2]   # <- eyes_crop_h
         eyes *= ratio # and resize 
-        if not inner_h:
-            return (image, eyes, ratio, H)
-        else: return (image, eyes, ratio)
+        return (image, eyes, ratio, H)
 
-    def _init_bg(self, image, eyes, ratio, in_degrees, rot_params):
-        # square padding
-        s = max(image.size)
-        image, eyes = self.pad_image(image, size=(s, s), eyes=eyes, padding_mode='constant')
-        # print('pre-rot.: ', image.size, ', post-rot.: ', end='')
-
-        bbox_coords = self.take_bbox(eyes,
-                           crop_margin = self.crop_margin * ratio)
-
-        # random initial rotation.
-        # _, in_degrees, in_radians = self.random_degrees(90)
-        in_degrees = in_degrees - (rot_params[1] / 2)
-        radians = in_degrees * 3.1415926 / 180
-        image = image.rotate(- in_degrees, expand=False)
-
-        # import ipdb; ipdb.set_trace()
-        initRotation = RotationCoords(radians,
-                               xy_t=np.array(image.size)/2, y_span=s)
-        eyes = initRotation(np.array(eyes))
-        bbox_vertices = initRotation(np.array(bbox_coords))
-
-        # bbox_vertices = bbox_coords
-        return (image, bbox_vertices, eyes)
 
     def _adjust_silhuette(self, bbox_vrtc, eyes):
         left_vtx = (bbox_vrtc[0,0], eyes[0,0,1])
@@ -259,25 +293,34 @@ class RandomRotatedResizedCrop(object):
         bbox_vrtc = np.insert(bbox_vrtc, (0, 2), insert_vrtc, axis=0)
         return bbox_vrtc
 
-    def _init_rotate(self, image, eyes, ratio):
+    def _init_rotate(self, image, eyes, ratio, in_degrees=None, rot_params=None):
         ''' set initial random rotation on image and coordinates.'''
         # pad image, take bbox according to new ratio
-        image, eyes = self.pad_image(image, eyes=eyes, padding_mode='constant')
+        if in_degrees:
+            s = max(image.size)
+            image, eyes = self.pad_image(image, size=(s, s), eyes=eyes, padding_mode='constant')
+        else:
+            image, eyes = self.pad_image(image, eyes=eyes, padding_mode='constant')
 
-        bbox_coords = self.take_bbox(eyes, 
+        bbox_coords = self.take_bbox(eyes,
                            crop_margin = self.crop_margin * ratio)
-        # add corners
-        # import ipdb; ipdb.set_trace()
-        # XXX NEW
         bbox_vertices = _find_coords_vertices(*bbox_coords)
         bbox_vertices = self._adjust_silhuette(bbox_vertices, eyes)
 
         # random initial rotation. 
-        _, in_degrees, in_radians = self.random_degrees(90)
-        print('  Degrees', in_degrees)
+        if in_degrees:
+            if not rot_params: raise ValueError
+            in_degrees = in_degrees - (rot_params[1] / 2)
+            radians = in_degrees * 3.1415926 / 180
+            # image = image.rotate(- in_degrees, expand=False)
+            initRotation = RotationCoords(radians,
+                               xy_t=np.array(image.size)/2, y_span=s)
+        else:
+            _, in_degrees, in_radians = self.random_degrees(90)
+            initRotation = RotationCoords(in_radians)
+
         image = image.rotate(- in_degrees) # , expand=True)
 
-        initRotation = RotationCoords(in_radians)
         eyes = initRotation(np.array(eyes))
         bbox_vertices = initRotation(np.array(bbox_vertices))
         # TODO bbox_vertices.jjkk
@@ -287,9 +330,8 @@ class RandomRotatedResizedCrop(object):
     def _rotate_and_composite_n(self, base_image, bbox_coords, bg=False,
                                   rotation_params = None):
 
-        # TODO: compute random reps from range based on ratio
         if not rotation_params:
-            reps, degrees, radians = self.random_degrees(*self.circular_reps)
+            reps, degrees, radians = self.random_degrees(*self.num_rotations)
         else:
             reps, degrees, radians = rotation_params
 
@@ -298,24 +340,17 @@ class RandomRotatedResizedCrop(object):
 
         mask = Image.new('1', base_image.size)
         draw_mask = ImageDraw.Draw(mask)
-        
-        draw_mask.polygon([tuple(c) for c in bbox_coords], fill=1 , outline=0)
+        draw_mask.polygon([tuple(c) for c in bbox_coords], fill=255)
+        base_image = Image.composite(base_image, mask.copy().convert('RGB'), mask)
 
         for r in range(reps):
             r_image = base_image.copy().rotate(- degrees * (r + 1), expand=False)
-            # if not bg:
-                # r_image = self.pad_image(r_image) # , size = (s,s))
-            
             base_image = Image.composite(base_image, r_image, mask)
 
-            if r != reps-1 or not bg:
-                bbox_coords = maskRotation(coords=np.array(bbox_coords))
-                draw_mask.polygon([tuple(c) for c in bbox_coords], fill=1, outline=0)
+            bbox_coords = maskRotation(coords=np.array(bbox_coords))
+            draw_mask.polygon([tuple(c) for c in bbox_coords], fill=255, outline=0)
 
-        if not bg:
-            return (base_image, mask, (reps, degrees, radians))
-        else:
-            return (base_image, mask) # , degrees)
+        return (base_image, mask, (reps, degrees, radians))
         
 
     def random_degrees(self, start, stop=None):
@@ -351,6 +386,11 @@ class RandomRotatedResizedCrop(object):
         else:
             assert len(size) == 2; 'Two params (h, w) expected for padding'
             t_w, t_h = size
+        if h == t_h:
+            if eyes is not None:
+                return (image, eyes)
+            else:
+                return image
 
         left_crop = (w - t_w) // 2
         r_crop = t_w + left_crop
@@ -370,7 +410,7 @@ class RandomRotatedResizedCrop(object):
             return image
 
 
-    def pad_image(self, image, size=None, padding_mode='constant', eyes = None):
+    def pad_image(self, image, size=None, fill=0, padding_mode='constant', eyes = None):
         w, h = image.size
         if not size:
             t_h = t_w = self.output_size
@@ -383,7 +423,7 @@ class RandomRotatedResizedCrop(object):
         top_pad = (t_h - h) // 2
         b_pad = t_h - (h + top_pad)
         padding = (left_pad, top_pad, r_pad, b_pad)
-        image = TF.pad(image, padding, 0 ,padding_mode)
+        image = TF.pad(image, padding, fill, padding_mode)
 
         if eyes is not None:
         # update landmarks coords
@@ -475,7 +515,8 @@ if __name__=='__main__':
     # RRRC = RandomRotatedResizedCrop(output_size = 256)
 
     # dataset = iter(FFHQLandmarks('ffhq-dataset-v2.json', 'data/FFHQ' , transform = RRRC))
-    dataloader = iter(sample_FFHQ_eyes(1, 256, shuffle=False, transform=RandomRotatedResizedCrop(output_size=256)))
+    dataloader = iter(sample_FFHQ_eyes(1, 256, shuffle=False,
+                                       transform=RandomRotatedResizedCrop(output_size=256)))
 
     viewpoint = 0
 
