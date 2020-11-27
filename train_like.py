@@ -17,7 +17,7 @@ from model import Glow
 from tqdm import tqdm
 # from train_r import calc_z_shapes
 from shell_util import AverageMeter, bits_per_dim
-from load_dataset import sample_from_directory
+from load_data import sample_from_directory
 
 
 def main(args):
@@ -66,6 +66,7 @@ def main(args):
 
 
 def calc_loss(log_p, logdet, image_size, n_bins):
+    # TODO: move to utils or Network module
     # log_p = calc_log_p([z_list])
     n_pixel = image_size * image_size * 3
 

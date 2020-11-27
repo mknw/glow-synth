@@ -1,0 +1,23 @@
+net:
+    arch: glow
+    n_samples: 64
+    affine: True
+    no_lu: False
+    n_flows: 32
+    n_blocks: 2
+    gpus: [0, 1]
+
+training:
+  # root_dir: data/glow_celeba 
+    temp: 0.8
+    n_bits: 5
+    lr: 0.0005
+    dataset: meyes
+    in_channels: 3
+    img_size: 128
+    batch_size: 16
+    n_samples: 25
+    n_workers: 8
+    benchmark: True
+    iter: 999999
+

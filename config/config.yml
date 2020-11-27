@@ -1,0 +1,29 @@
+net:
+    arch: glow
+    n_samples: 64
+    affine: False
+    no_lu: False
+    n_flows : 32
+    n_blocks : 4
+    n_bits: 5
+    temp : 0.7
+    gpus: [0]
+    benchmark: True
+
+training:
+    root_dir: data/glow_celeba 
+    dataset: celeba
+    in_channels: 3
+    img_size: 64
+    batch_size: 8
+    n_samples: 64
+    n_workers: 8
+
+pca:
+    n_pcs: 20
+    whiten: True
+
+umap:
+    nn: 5
+    min_dist: 0.2
+    n_components: 2

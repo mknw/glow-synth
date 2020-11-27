@@ -27,12 +27,18 @@ import os
 import shutil
 from random import randrange
 # from mnist_simil import cleanup_version_f
+from utils import load_network
+from warnings import warn
+from load_data import Attributes, select_model
 
-def main(args, epochs=[160000, 150000], save=True, force=False):
+lstify = lambda s: [s] if isinstance(s, str) else s
+maketree = lambda l: [os.makedirs(p, exist_ok=True) for p in lstify(l)]
+
+def main(args, epochs=[160000], save=True, force=False):
 
     p_value_counts = dict()
     for e in epochs:
-        model_meta_stuff = select_model(args.root_dir, args.version, test=e)
+        model_meta_stuff = select_model(args.root_dir, args.version, test_epoch=e)
         fp_model_root, fp_model, fp_vmarker = model_meta_stuff
         # mark_version(args.version, fp_vmarker) # echo '\nV-' >> fp_vmarker
 
@@ -45,11 +51,9 @@ def analyse_epoch(args, model_meta_stuff = None):
     device = torch.device("cuda:0" if torch.cuda.is_available() and len(args.gpu_ids) > 0 else "cpu")
     print("evaluating on: %s" % device)
     
-    # import ipdb; ipdb.set_trace()
-
     # select model.
     if not model_meta_stuff:
-        fp_model_root, fp_model, fp_vmarker = select_model(args.root_dir, args.version, test=i)
+        fp_model_root, fp_model, fp_vmarker = select_model(args.root_dir, args.version, test_epoch=i)
     else:
         fp_model_root, fp_model, fp_vmarker = model_meta_stuff
 
@@ -91,16 +95,10 @@ def analyse_epoch(args, model_meta_stuff = None):
     fp_distr = fp_model_root + '/distr' # distributions
     fp_simil = fp_model_root + '/similarity' # similarity
     fp_replace = fp_model_root + '/replace_from_grandz'
-    fp_pca = fp_model_root + '/pca'
-    fp_umap = fp_model_root + '/umap'
+    fp_pca = fp_model_root + '/pca2'
+    fp_umap = fp_model_root + '/umap2'
     paths = [fp_distr, fp_simil, fp_replace, fp_pca]
     # lstify = lambda s: [s] if isinstance(s, str)
-    def lstify(s):
-        if isinstance(s, str):
-            return [s]
-        elif isinstance(s, list):
-            return s
-    maketree = lambda l: [os.makedirs(p, exist_ok=True) for p in lstify(l)]
     maketree(paths)
     # [os.makedirs(ppp, exist_ok=True) for ppp in [fp_distr, fp_simil, fp_replace, fp_pca]]
     
@@ -162,19 +160,20 @@ def analyse_epoch(args, model_meta_stuff = None):
     # dataset = stats['z'].reshape(stats['z'].shape[0], -1)
 
     # # # # pick_components = 350
-    # fp_pca += '/nosig'; maketree([fp_pca])
+    # fp_pca += '/last'; maketree(fp_pca)
     # for pick_components in [50, 100, 1000]:
     # 	print('computing PCA...{}...'.format(pick_components), end='')
     # 	pca = PCA(n_components=pick_components).fit(dataset) # dataset.data
     # 	if pick_components == 'mle':
     # 		print(f' N PCs found: {pca.n_components_}')
     # 	analyse_principal_components(pca,stats,attr_y,fp_pca,36, net, device)
+    # 	del pca
 
     print('umap analysis')
     if 'net' not in dir():
         net, _ = load_network( fp_model, device, args)
         net.eval()
-    fp_umap += '/resamp_temp8'; maketree(fp_umap)
+    # fp_umap += '/resamp_temp8'; maketree(fp_umap)
     umap_inverse_wrapper(stats, attr_y, fp_umap, net, device)
     print('done')
 
@@ -258,7 +257,7 @@ def analyse_principal_components(pca, stats, att, fp_pca,pk, net=None, device=No
     for i in range(40):
         print(f"plotting {att.columns[i]} reduced z's... ", end='')
         fn = fp_pca + '/red/rZatt_{}-{}.png'.format(i, att.columns[i])
-        plot_reduced_dataset(pca, stats['z'], att, k=10, att_ind=i, filename=fn)
+        plot_reduced_dataset(pca, stats['z'], att, k=15, att_ind=i, filename=fn)
     print("done.")
 
 
@@ -396,33 +395,40 @@ def PCA_test(z_s, k, center=False, mode='self'):
         PCs['y'] = y
         return PCs
 
-def select_att_series(attr_df, att_ind, max_attributes=10):
+def subset_attributes(attr_df, att_ind, overall_indexer=False, complementary=True, max_attributes=10):
+    ''' Arguments:
+        attr_df: pandas dataframe with labeled attributes for celebA
+        att_ind: int or [list of ints], for n attributes subset to be returned
+        Returns:
+            dataframe object with all attributes + complementary
+        ex headers:
+            subset:              (optional columns:)
+            | att_1 | att_5 |    ( comp_att_1 | comp_att_5 | anyistrue )   |
+
+        Note: all attributes are 1-hot encoded (1 = True, 0 = False)
+            '''
 
     if not isinstance(att_ind, (int, list, tuple)):
         raise TypeError
 
+    # if isinstance(att_ind, int):
+    # 	subsel_df = pd.concat([attr_df.iloc[:, att_ind], (attr_df.iloc[:, att_ind] == 0)], axis=1)
+    # 	overall_indexer = (subsel_df == 1).any(axis=1)
+    # 	return pd.concat([subsel_df, overall_indexer], axis=1)
+    # if length > 1: # assumed sequence
 
-    if isinstance(att_ind, int):
-        subsel_df = pd.concat([attr_df.iloc[:, att_ind], (attr_df.iloc[:, att_ind] == 0)], axis=1)
-        overall_indexer = (subsel_df == 1).any(axis=1)
-        return pd.concat([subsel_df, overall_indexer], axis=1)
-    else:
-        length = len(att_ind)
-        if length > 1: # assumed sequence
-            selection = attr_df.iloc[:, np.array(att_ind)]
-            attribute_names = list(selection.columns)
-            complement_categs_names = ['comp_' + c for c in attribute_names]
-            # concatenate selected attributes df with its complementary.
-            subsel_df = pd.concat([selection, (attr_df.iloc[:, np.array(att_ind)] == 0)], axis=1)
-            subsel_df.columns = attribute_names + complement_categs_names
-            overall_indexer = (subsel_df == 1).any(axis=1)
-            
-            return pd.concat([subsel_df, overall_indexer], axis=1)
+    subsel_df = pd.DataFrame(attr_df.iloc[:, att_ind]) # was numpy.array(5)
+    attribute_names = list(subsel_df.columns)
+    if complementary:
+        complement_categs_names = ['comp_' + c for c in attribute_names]
+        # concatenate selected attributes df with its complementary.
+        subsel_df = pd.concat([subsel_df, (attr_df.iloc[:, att_ind] == 0)], axis=1)
+        subsel_df.columns = attribute_names + complement_categs_names
+    if overall_indexer:
+        index_all = (subsel_df == 1).any(axis=1)
+        subsel_df = pd.concat([subsel_df, index_all], axis=1)
+    return subsel_df
 
-        elif length < 1 or length > max_attributes:
-            raise ValueError
-
-    
 
 
 def plot_reduced_dataset(pca, z_s, att, k, att_ind, filename):
@@ -437,7 +443,7 @@ def plot_reduced_dataset(pca, z_s, att, k, att_ind, filename):
         ratio_var_exp = pca.explained_variance_ratio_[:k][::-1]
         '''z_s, y = label_zs(z_s)'''
         
-        sel_att_df = select_att_series(att, att_ind)
+        sel_att_df = subset_attributes(att, att_ind, overall_indexer=True, complementary=True)
         red_z = pca.transform(z_s[ sel_att_df.iloc[:, -1]].reshape(sel_att_df.shape[0], -1))
         reduced_z = red_z[:, :k][:,::-1]   # PCs['X'].T becomes (306,10000)
     else: # should be type: sklearn.decomposition.PCA
@@ -451,11 +457,12 @@ def plot_reduced_dataset(pca, z_s, att, k, att_ind, filename):
 
     # Use subset dataframe turn 1 hot vectors into indices,
     # then add column for "both" categories if overlapping.
+    # import ipdb; ipdb.set_trace()
     color_series, overlapping_attributes = category_from_onehot(sel_att_df)
     # color_series += 2 # make it red
     
     for row in range(n_pcs):
-        # randomly permutation of reduced datapoints for 
+        # random permutation of reduced datapoints for 
         # visualization that is evened among categories. 
         # indices = np.random.permutation(reduced_z.shape[0])
         # reduced_z = np.take(reduced_z, indices, axis=0)
@@ -489,6 +496,7 @@ def plot_reduced_dataset(pca, z_s, att, k, att_ind, filename):
     fig.subplots_adjust(top=.88)
     plt.savefig(filename, bbox_inches='tight')
     plt.close()
+    print(f'Saved to {filename}.')
 
 
 
@@ -629,7 +637,7 @@ def rotation_matrix(angle):
     theta = angle
     return np.array([[np.cos(theta), np.sin(theta), 0], [-np.sin(theta), np.cos(theta), 0],[0,0,1]])
 
-def make_grid(boundaries, degrees=0, scale_factor = 0.5, edge_scale_factors=(0.3, 1)):
+def make_grid(boundaries, degrees=0, scale_factor = 0.5, edge_scale_factors=(1, 1)):
     xmin, ymin, xmax, ymax = boundaries
     # get center of grid.
     radians = degrees * np.pi / 180 # TODO define degrees
@@ -669,7 +677,7 @@ def category_from_onehot(onehot_df, idcs=(0, 1), vals=(1, 2), over_val=None):
 
     if (onehot_df.iloc[:, np.array(idcs)].sum(axis=1) > 1).any():
         overlapping_onehot_ = True
-        print('W: overlapping categories found: filling with value: {over_val}')
+        warn(' Overlapping categories found: filling with value: {over_val}')
         color_series[onehot_df.iloc[:,np.array(idcs)].sum(axis=1)] = over_val
     else: overlapping_onehot_ = False
     return color_series, overlapping_onehot_
@@ -683,43 +691,48 @@ def umap_inverse_wrapper(stats, att, fp_umap, net=None, device=None, n_neighbors
     ''' attributes '''
     # att_ind = (20, 31)
     '''here''' # and call it in plot_inverse_umap
+    # import ipdb; ipdb.set_trace()
     
     if not n_neighbors_l:
-        n_neighbors_l = [20, 100, 400]
-        min_dist_l = [0.2, 0.2, 0.2]
+        n_neighbors_l = [20, 100] # , 400]
+        min_dist_l = [0.2, 0.2]
     else:
         n_neighbors_l = [n_neighbors_l]
     for nn , md in zip(n_neighbors_l, min_dist_l):
-        print(f'UMAP: nearest_n = {nn}, min_dist = .2')
-        deg = 45
-        knn = 100
-        knn_w = 'distance'
-        # grid_s = 0.35
-        umap = UMAP(n_neighbors=nn, min_dist= md,
-                                n_components=2, random_state=42)
-        mapper = umap.fit(dataset)
-        inverse_sampling = True
-        choice, choice2 = np.random.randint(40, size=2)
-        for a_i in [choice]: # range(40):
-            for a_j in [choice2]: # range(a_i+1, 40):
+        for temp in np.linspace(0.6, 0.8, 5):
+            fp_umap_ = f'{fp_umap}/resamp_{temp:.1f}'
+            maketree(fp_umap_)
+            # was for nn, md in zip(...):
+            print(f'UMAP: nearest_n = {nn}, min_dist = .2')
+            deg = 45
+            knn = 100
+            knn_w = 'distance'
+            # grid_s = 0.35
+            umap = UMAP(n_neighbors=nn, min_dist= md,
+                                    n_components=2, random_state=42)
+            umap= umap.fit(dataset)
+            inverse_sampling = True
+            choice, choice2 = np.random.randint(40, size=2)
+            for a_i in [choice]: # range(40):
+                for a_j in [choice2]: # range(a_i+1, 40):
 
-                attributes = select_att_series(att, att_ind=(a_i, a_j))
-                col_arr = attributes.iloc[:, 0]
-                sym_arr = attributes.iloc[:, 1]
-                names = attributes.iloc[:,0].name + '-' + attributes.iloc[:,1].name
+                    attributes = subset_attributes(att, att_ind=(a_i, a_j))
+                    col_arr = attributes.iloc[:, 0]
+                    sym_arr = attributes.iloc[:, 1]
+                    names = attributes.iloc[:,0].name + '-' + attributes.iloc[:,1].name
 
-                print(f'computing inverse umap sampling for: {names}', end='')
-        
-                basename = '/{}-{}_{}_nn{:d}_md{:.2f}_knn{:d}'.format(a_i, a_j, names, nn,md,knn)
+                    print(f'computing inverse umap sampling for: {names}', end='')
+            
+                    basename = '/{}-{}_{}_nn{:d}_md{:.2f}_knn{:d}'.format(a_i, a_j, names, nn,md,knn)
 
-                fn = fp_umap + basename + '.jpg'
-                plot_inverse_umap(fn, att=att, n_neighbors=nn, min_dist=md, knn=knn, deg_rot=deg,
-                                  col_arr=col_arr, sym_arr=sym_arr, knn_weights=knn_w,
-                                  inverse_sampling=inverse_sampling,mapper=mapper,net=net,
-                                  device=device, grid_scale=1, temp=0.8)
+                    fn = fp_umap_ + basename + '.jpg'
+                    plot_inverse_umap(fn, att=att, n_neighbors=nn, min_dist=md, knn=knn, deg_rot=deg,
+                                      col_arr=col_arr, sym_arr=sym_arr, knn_weights=knn_w,
+                                      inverse_sampling=inverse_sampling,mapper=umap,net=net,
+                                      device=device, temp=temp)
+            del umap
 
-                inverse_sampling = False
-                break
+                    # inverse_sampling = False
 
 
 def plot_knn_boundaries(x1, x2, y, nn=5, weights='distance', h=.02, ax=None,
@@ -770,7 +783,7 @@ def plot_inverse_umap(filename, stats=None, att=None,
 
     grid_boundaries = [mapper.embedding_[:,0].min(), mapper.embedding_[:,1].min(),
               mapper.embedding_[:,0].max(), mapper.embedding_[:,1].max()]
-    test_pts = make_grid(grid_boundaries, degrees=deg_rot, scale_factor=grid_scale)
+    test_pts = make_grid(grid_boundaries, degrees=0, scale_factor=grid_scale)
 
     # setup plotting grid
     from matplotlib.gridspec import GridSpec
@@ -839,14 +852,15 @@ def plot_inverse_umap(filename, stats=None, att=None,
         print('done!')
         # ### original Zs
         # # keep original Zs for plotting; oriZ for generation
-        # torch.cuda.empty_cache()
+        grid_test_pts = mapper.transform(inv_transformed_points * temp)
+        scatter_ax.scatter(grid_test_pts[:,1], grid_test_pts[:,0], marker='+', c='w', s=15, alpha=1)
+        torch.cuda.empty_cache()
         tZ = torch.from_numpy(inv_transformed_points.reshape(100, 3,64,64).astype(np.float32)).to(device)
         # tZ = torch.randn((100, 3, 64, 64), dtype=torch.float32, device=device) #changed 3 -> 1
 
         tX = np.array([], dtype=np.float32).reshape(0, 3, 64, 64)
         for t_Z_ in tZ.view(4, 25, 3, 64, 64):
             with torch.no_grad():
-                # TODO: add temperature
                 t_x_ = net(net(t_Z_ * temp, partition=True), reverse=True, resample=True)
                 tX = np.concatenate([tX, t_x_.to('cpu').detach().numpy()])
 
@@ -1263,47 +1277,6 @@ def violin_eachdigit(stats, att, filename, n_epoch):
     plt.close()
     print('\nPlot saved to ' + filename)
 
-class Attributes:
-    ''' minimal accessory class for correct 
-    import/export of goods and dataframes with
-    proper column labeling for celeba attributes'''
-
-    def __init__(self):
-        self.filename='data/1_den_celeba/attr_y.csv'
-        self.headers = ["5_o_Clock_Shadow", "Arched_Eyebrows", "Attractive", "Bags_Under_Eyes", "Bald", "Bangs", "Big_Lips", "Big_Nose", "Black_Hair", "Blond_Hair", "Blurry", "Brown_Hair", "Bushy_Eyebrows", "Chubby", "Double_Chin", "Eyeglasses", "Goatee", "Gray_Hair", "Heavy_Makeup", "High_Cheekbones", "Male", "Mouth_Slightly_Open", "Mustache", "Narrow_Eyes", "No_Beard", "Oval_Face", "Pale_Skin", "Pointy_Nose", "Receding_Hairline", "Rosy_Cheeks", "Sideburns", "Smiling", "Straight_Hair", "Wavy_Hair", "Wearing_Earrings", "Wearing_Hat", "Wearing_Lipstick", "Wearing_Necklace", "Wearing_Necktie", "Young"]
-        self.colors = None # for now XXX
-
-    def fetch(self, filename='data/1_den_celeba/attr_y.pkl'):
-        # make it pandas dataframe
-        if filename.endswith('.pkl') or filename.endswith('.pickle'):
-            self.df = pd.read_pickle(filename)
-        elif filename.endswith('.csv'):
-            self.df_csv = pd.read_csv(filename, index_col=False, dtype=np.int8)
-        print('Fetched dataframe from file {}.'.format(filename))
-        return self.df
-
-    def make_and_save_dataframe(self, y, filename='data/1_den_celeba/attr_y.pkl'):
-        df = pd.DataFrame(y, columns=self.headers, dtype=np.int8)
-        if filename.endswith('.pkl'):
-            df.to_pickle(filename) # this should be it. Nice and simple.
-        elif filename.endswith('.csv'):
-            df.to_csv(filename, index=False)
-        print('saved celeba attributes to {}'.format(filename))
-        return df
-
-    # def attribute_in_z(self, a):
-
-    # 	if isinstance(a, int):
-    # 		if a >= 0 and a <= 40:
-    # 			attribute = self.headers[a]
-    # 		else: raise ValueError
-    # 	elif isinstance(a, str):
-    # 		if a not in self.headers:
-    # 			raise ValueError
-    # 	else:
-    # 		raise ValueError('int > 0 and < than 0, or one of the following strings: {}. Got {} instead.'.format(self.headers, a)
-
-
 
 def tellme_ys(net, loader, device):
 
@@ -1543,29 +1516,6 @@ def verify_version(fp, version_string):
         print(f'File {fp} not found.')
         return False # if file doesn't exist.
 
-def select_model(model_root, analyse_version, vmarker_fn='/version', 
-                     epoch_range=(430, 690), test=False, granularity=10, figures=6):
-    ''' Select EPOCH according to version specifications. (change function name)
-    Out: 
-        - fp_vmarker : int --  file containing `version`
-        - fp_model : str -- file to model.pth.tar
-        '''
-    verified_ver = True
-    while verified_ver:
-        if test:
-            assert isinstance(test, int), 'Epoch must be int'
-            model_epoch = test
-        else:
-            model_epoch = randrange(epoch_range[0], epoch_range[1], granularity) # TODO only produce n%10==0
-        fp_model_root = model_root + f'/epoch_{str(model_epoch).zfill(figures)}' #  + str(model_epoch)
-        fp_vmarker = fp_model_root + vmarker_fn
-        if test:
-            break
-        else:
-            verified_ver = verify_version(fp_vmarker, str(analyse_version))
-    fp_model = fp_model_root + '/model.pth.tar'
-    print('selected model at {}th epoch'.format(model_epoch))
-    return fp_model_root, fp_model, fp_vmarker
 
 def mark_version(version_str, fp_vmarker, finish=False, sep='-'):
     ''' write first and last parts of `version_str` to `fp_vmarker`
@@ -1598,97 +1548,6 @@ def mark_version(version_str, fp_vmarker, finish=False, sep='-'):
 # 				else:
 # 					t.write(l)
 # 	shutil.move(tmp_fp_vmarker, fp_vmarker)
-    
-
-
-def load_mnist_test(args):
-    transform_train = transforms.Compose([
-        transforms.ToTensor()
-        # transforms.ColorJitter(brightness=0.3)
-    ])
-    #torchvision.transforms.Normalize((0.1307,), (0.3081,)) # mean, std, inplace=False.
-    transform_test = transforms.Compose([
-        transforms.ToTensor()
-    ])
-    # trainset = torchvision.datasets.MNIST(root='data', train=True, download=True, transform=transform_train)
-    # trainloader = data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
-    testset = torchvision.datasets.MNIST(root='data', train=False, download=True, transform=transform_test)
-    testloader = data.DataLoader(testset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
-    return testloader
-
-def load_celeba(batch, image_size, test=False, shuffle=False):
-    if not test:
-        split = 'train'
-        transform = transforms.Compose([
-            transforms.CenterCrop(160),
-            transforms.Resize(size=image_size),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-        ])
-        shuffle=True
-    else:
-        split = 'test'
-        transform = transforms.Compose([
-        transforms.CenterCrop(160),
-        transforms.Resize(size=image_size),
-        transforms.ToTensor(),
-    ])
-    print(f'shuffle set to {shuffle} for split: {split}')
-    target_type = ['attr', 'bbox', 'landmarks']
-    dataset = datasets.CelebA(root='data', split=split, target_type=target_type[0], download=True, transform=transform)
-    loader = DataLoader(dataset, batch_size=batch, shuffle=shuffle, num_workers=8)
-    return loader
-
-def load_cifar_test(args):
-    # Note: No normalization applied, since RealNVP expects inputs in (0, 1).
-    transform_train = transforms.Compose([
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor()
-    ])
-    #torchvision.transforms.Normalize((0.1307,), (0.3081,)) # mean, std, inplace=False.
-    transform_test = transforms.Compose([
-        transforms.ToTensor()
-    ])
-    trainset = torchvision.datasets.CIFAR10(root='data', train=True, download=True, transform=transform_train)
-    trainloader = data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
-    testset = torchvision.datasets.CIFAR10(root='data', train=False, download=True, transform=transform_test)
-    testloader = data.DataLoader(testset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
-    return testloader
-
-def load_network(model_dir, device, args):
-    if args.net == 'glow':
-        from model import Glow
-        net = Glow(3, args.n_flow, args.n_block, affine=args.affine, conv_lu=not args.no_lu)
-        from train_like import calc_loss
-        loss_fn = calc_loss
-    elif args.net in ['densenet', 'resnet']:
-        net = RealNVP( **filter_args(args.__dict__) )
-        from models import RealNVP, RealNVPLoss
-        loss_fn = RealNVPLoss()
-
-    net = net.to(device)
-    if str(device).startswith('cuda'):
-        net = torch.nn.DataParallel(net, args.gpu_ids)
-        cudnn.benchmark = args.benchmark
-
-    # load checkpoint
-    checkpoint = torch.load(model_dir)
-    try:
-        net.load_state_dict(checkpoint['net'])
-    except RuntimeError as re:
-        print(re)
-        raise ArchError('There is a problem importing the model, check parameters.')
-
-    return net, loss_fn
-
-
-class ArchError(Exception):
-    def __init__(self, message=None):
-        if not message:
-            self.message = "State dictionary not matching your architecture. Check your params."
-        else:
-            self.message = message
-
 
 def filter_args(arg_dict, desired_fields=None):
     """only pass to network architecture relevant fields."""

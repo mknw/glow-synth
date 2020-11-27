@@ -17,55 +17,54 @@ from model import Glow
 from tqdm import tqdm
 # from train_r import calc_z_shapes
 from shell_util import AverageMeter, bits_per_dim
+from reduce import load_network
 
+from config.config import ConfWrap
 
-def main(args):
+def main(C):
 
-    device = torch.device("cuda:0" if torch.cuda.is_available() and len(args.gpu_ids) > 0 else "cpu")
+    device = torch.device("cuda:0" if torch.cuda.is_available() and len(C.net.gpus) > 0 else "cpu")
     print("training on: %s" % device)
     start_epoch = 0
 
 
-    if args.net == 'glow':
-        model = Glow(3, args.n_flow, args.n_block, affine=args.affine, conv_lu=lu_conv)
-        net = model.to(device)
-    else:
-        net = RealNVP( **filter_args(args.__dict__) )
-        net = net.to(device)
-
+    # net, = load_network(model_fp, device, C.net)
+    model = Glow(3, C.net.n_flows, C.net.n_blocks, affine=C.net.affine, conv_lu=C.net.lu_conv)
+    net = model.to(device)
     if str(device).startswith('cuda'):
-        net = torch.nn.DataParallel(net, args.gpu_ids)
-        cudnn.benchmark = args.benchmark
+        net = torch.nn.DataParallel(net, C.net.gpus)
+        cudnn.benchmark = C.training.benchmark
 
-    if args.resume: # or not args.resume:
+    if C.resume: # or not C.resume:
         # Load checkpoint. TODO: uncomment last line, delete the next one
-        args.model_dir = find_last_model_relpath(args.root_dir) # /model_{str(i + 1).zfill(6)}.pt'
-        # args.model_dir = f'{args.root_dir}/epoch_180000'
-        print(f'Resuming from checkpoint at {args.model_dir}')
-        checkpoint = torch.load(args.model_dir+'/model.pth.tar')
+
+        # import ipdb; ipdb.set_trace()
+        C.model_dir = find_last_model_relpath(C.training.root_dir) # /model_{str(i + 1).zfill(6)}.pt'
+        # C.model_dir = f'{C.root_dir}/epoch_180000'
+        print(f'Resuming from checkpoint at {C.model_dir}')
+        checkpoint = torch.load(C.model_dir+'/model.pth.tar')
         net.load_state_dict(checkpoint['net'])
         global best_loss
         best_loss = checkpoint['test_loss']
         # we start epoch after the saved one (avoids overwrites).
         start_epoch = checkpoint['epoch'] + 1
+        print(f"Resuming from epoch: {checkpoint['epoch']}")
     else:
-        os.makedirs(args.root_dir, exist_ok=True)
-        os.makedirs(args.sample_dir, exist_ok=True)
+        os.makedirs(C.training.root_dir, exist_ok=True)
+        os.makedirs(C.training.sample_dir, exist_ok=True)
 
-    if args.net == 'glow':
-        optimizer = optim.Adam(net.parameters(), lr=args.learning_rate)
-        if args.resume:
-            try:
-                optimizer.load_state_dict(torch.load(f'{args.model_dir}/optim.pt'))
-            except KeyError:
-                print(f'error loading {args.model_dir}/optim.pt')
-                optimizer.load_state_dict(torch.load('data/glow_meyes_2/epoch_310000/optim.pt'))
-    else:
-        loss_fn = RealNVPLoss()
-        param_groups = util.get_param_groups(net, args.weight_decay, norm_suffix='weight_g')
-        optimizer = optim.Adam(param_groups, lr=args.lr, eps=1e-7)
+    optimizer = optim.Adam(net.parameters(), lr=float(C.training.learning_rate))
+    if C.resume:
+        try:
+            optimizer.load_state_dict(torch.load(f'{C.model_dir}/optim.pt'))
+        except KeyError:
+            print(f'error loading {C.model_dir}/optim.pt')
+            optimizer.load_state_dict(torch.load('data/glow_meyes_2/epoch_310000/optim.pt'))
 
-    train(args, net, device, optimizer, start_epoch)
+    z_sample = find_or_make_z(C.training.root_dir + '/z_samples.pkl',
+                              3, C.training.img_size, C.net.n_flows, C.net.n_blocks,
+                              C.training.n_samples, C.training.temp, device)
+    train(C.training, net, device, optimizer, start_epoch, z_sample)
 
 
 def calc_loss(log_p, logdet, image_size, n_bins):
@@ -81,89 +80,88 @@ def calc_loss(log_p, logdet, image_size, n_bins):
         (logdet / (log(2) * n_pixel)).mean(),
     )
 
-def train(args, net, device, optimizer, start_epoch):
+def train(config, net, device, optimizer, start_epoch, z_sample):
 
-    if args.dataset == 'celeba':
-        dataset = iter(sample_celeba(args.batch, args.img_size))
-    elif args.dataset == 'ffhq':
-        from load_dataset import sample_from_directory
-        dataset = iter(sample_from_directory('data/FFHQ/images1024x1024', args.batch, args.img_size))
-    elif args.dataset == 'meyes':
-        from load_dataset import sample_FFHQ_eyes
-        from load_dataset import RandomRotatedResizedCrop as RRRC
-        dataset = iter(sample_FFHQ_eyes(args.batch, args.img_size, shuffle=True,
-                                        transform=RRRC(output_size=256)))
+    if config.dataset == 'celeba':
+        dataset = iter(sample_celeba(config.batch_size, config.img_size))
+    elif config.dataset == 'ffhq':
+        from load_data import sample_from_directory
+        dataset = iter(sample_from_directory('data/FFHQ/images1024x1024', config.batch_size, config.img_size))
+    elif config.dataset == 'meyes':
+        from load_data import sample_FFHQ_eyes
+        from load_data import RandomRotatedResizedCrop as RRRC
+        dataset = iter(sample_FFHQ_eyes(config.batch_size, config.img_size, shuffle=True,
+                                        transform=RRRC(output_size=config.img_size)))
 
-    n_bins = 2. ** args.n_bits
+    n_bins = 2. ** config.n_bits
 
-    z_sample = find_or_make_z(args.root_dir + '/z_samples.pkl',
-                              3, args.img_size, args.n_flow, args.n_block,
-                              args.num_sample, args.temp, device)
 
     loss_meter = AverageMeter()
     bpd_meter = AverageMeter()
 
     p_imgs = 0
     net.train()
-    with tqdm(range(start_epoch, args.iter)) as pbar:
-        for i in pbar:
-            x, _ = next(dataset)
-            x = x.to(device)
+    pbar = tqdm(range(start_epoch, config.iter))
+    pbar.update(start_epoch); pbar.refresh()
+    import ipdb; ipdb.set_trace()
+    for i in pbar:
+        x, _ = next(dataset)
+        x = x.to(device)
 
-            if i == 0:
-                with torch.no_grad():
-                    # log_p, logdet, _ = net.module(x + torch.rand_like(x) / n_bins)
-                    log_p, logdet, _ = net(x + torch.rand_like(x) / n_bins)
-                    continue
-            else:
+        if i == 0:
+            with torch.no_grad():
                 log_p, logdet, _ = net(x + torch.rand_like(x) / n_bins)
+                continue
+        else:
+            log_p, logdet, _ = net(x + torch.rand_like(x) / n_bins)
 
-            logdet = logdet.mean()
+        logdet = logdet.mean()
 
-            loss, log_p, log_det = calc_loss(log_p, logdet, args.img_size, n_bins)
-            net.zero_grad()
-            loss.backward()
-            # warmup_lr = args.lr * min(1, i * batch_size / (50000 * 10))
-            warmup_lr = args.lr
-            optimizer.param_groups[0]['lr'] = warmup_lr
-            optimizer.step()
-            loss_meter.update(loss.item(), x.size(0))
-            bpd_meter.update(bits_per_dim(x, loss_meter.avg))
+        loss, log_p, log_det = calc_loss(log_p, logdet, config.img_size, n_bins)
+        net.zero_grad()
+        loss.backward()
+        # warmup_lr = C.lr * min(1, i * batch_size / (50000 * 10))
+        warmup_lr = config.learning_rate
+        optimizer.param_groups[0]['lr'] = warmup_lr
+        optimizer.step()
+        loss_meter.update(loss.item(), x.size(0))
+        bpd_meter.update(bits_per_dim(x, loss_meter.avg))
 
-            pbar.set_description(
-                    f'Loss: {loss.item():.5f}; logP: {log_p.item():.5f}; logdet: {log_det.item():.5f}; lr: {warmup_lr:.7f}; imgs: {p_imgs}'
+        pbar.set_description(
+                f'Loss: {loss.item():.5f}; logP: {log_p.item():.5f}; logdet: {log_det.item():.5f}; lr: {warmup_lr:.7f}; imgs: {p_imgs}'
+        )
+        p_imgs += x.size(0)
+        if i % 1000 == 0:
+            # save model
+            if i % 10000 == 0:
+                # TEST
+                model_dir = f'{config.root_dir}/epoch_{str(i).zfill(6)}'
+                os.makedirs(model_dir, exist_ok=True)
+            else:
+                model_dir = config.root_dir
+            torch.save({'net': net.state_dict(),
+                        'test_loss': loss_meter.avg,
+                                    'epoch': i 
+                                    },
+                                    f'{model_dir}/model.pth.tar'
             )
-            p_imgs += x.size(0)
-            if i % 1000 == 0:
-                net.eval()
-                # SAMPLE
-                with torch.no_grad():
-                    torchvision.utils.save_image(net(z_sample, reverse=True).cpu().data,
-                                                 f'{args.sample_dir}/{str(i).zfill(6)}.png',
-                                                 normalize=True,
-                                                 nrow = int(args.num_sample ** 0.5),
-                                                 range=(-0.5, 0.5))
+            torch.save(
+                optimizer.state_dict(), f'{model_dir}/optim.pt'
+            )
+            # Generate new samples.
+            with torch.no_grad():
+                torchvision.utils.save_image(net(z_sample, reverse=True).cpu().data,
+                                             f'{config.sample_dir}/{str(i).zfill(6)}.png',
+                                             normalize=True,
+                                             nrow = int(config.n_samples ** 0.5),
+                                             range=(-0.5, 0.5))
 
-                with open(f'{args.root_dir}/log', 'a') as l:
-                    report = f'{loss.item():.5f},{log_p.item():.5f},{log_det.item():.5f},{warmup_lr:.7f},{p_imgs}\n'
-                    # print("Writing to disk: " + report + ">> {}/log".format(args.root_dir))
-                    l.write(report)
-                if i % 10000 == 0:
-                    # TEST
-                    model_dir = f'{args.root_dir}/epoch_{str(i).zfill(6)}'
-                    os.makedirs(model_dir)
-                else:
-                    model_dir = args.root_dir
-                torch.save({'net': net.state_dict(),
-                            'test_loss': loss_meter.avg,
-                                        'epoch': i 
-                                        },
-                                        f'{model_dir}/model.pth.tar'
-                )
-                torch.save(
-                    optimizer.state_dict(), f'{model_dir}/optim.pt'
-                )
-            net.train()
+            with open(f'{config.root_dir}/log', 'a') as l:
+                report = f'{loss.item():.5f},{log_p.item():.5f},{log_det.item():.5f},{warmup_lr:.7f},{p_imgs}\n'
+                # print("Writing to disk: " + report + ">> {}/log".format(config.root_dir))
+                l.write(report)
+
+        net.train()
 
 def sample_celeba(batch, image_size, test=False):
     if not test:
@@ -199,21 +197,22 @@ def sample_celeba(batch, image_size, test=False):
             yield next(loader)
 
 
-def find_or_make_z(path, C, img_size, n_flow, n_block, num_sample, t, device):
+def find_or_make_z(path, C, img_size, n_flows, n_block, num_sample, t, device):
 
     if os.path.isfile(path):
         z_sample = torch.load(path)
 
     else:
         z_sample = []
-        z_shapes = calc_z_shapes(3, img_size, n_flow, n_block)
+        z_shapes = calc_z_shapes(3, img_size, n_flows, n_block)
         for z in z_shapes:
             z_new = torch.randn(num_sample, *z) * t
             z_sample.append(z_new.to(device))
 
         torch.save(z_sample, path)
     return z_sample
-def calc_z_shapes(n_channel, input_size, n_flow, n_block):
+
+def calc_z_shapes(n_channel, input_size, n_flows, n_block):
     z_shapes = []
 
     for i in range(n_block - 1):
@@ -250,7 +249,7 @@ def sample(net, num_samples, in_channels, device, resize_hw=None):
     return x, z
 
 
-def test(epoch, net, testloader, device, loss_fn, **args):
+def test(epoch, net, testloader, device, loss_fn, **C):
     global best_loss
     net.eval()
     loss_meter = util.AverageMeter()
@@ -270,7 +269,7 @@ def test(epoch, net, testloader, device, loss_fn, **args):
                 progress_bar.update(x.size(0))
                 
     # Save checkpoint
-    save_dir = args['dir_samples'] + '/epoch_{:03d}'.format(epoch) #  + str(epoch)
+    save_dir = C['dir_samples'] + '/epoch_{:03d}'.format(epoch) #  + str(epoch)
     os.makedirs(save_dir, exist_ok=True)
 
     # if loss_meter.avg < best_loss or epoch % 10 == 0 or
@@ -286,10 +285,10 @@ def test(epoch, net, testloader, device, loss_fn, **args):
         best_loss = loss_meter.avg
 
     sample_fields = ['num_samples', 'in_channels', 'resize_hw']
-    images, latent_z = sample(net, device=device, **filter_args( args, fields=sample_fields ) )
+    images, latent_z = sample(net, device=device, **filter_args( C, fields=sample_fields ) )
 
     # plot x and z
-    num_samples = args['num_samples']
+    num_samples = C['num_samples']
     images_concat = torchvision.utils.make_grid(images, nrow=int(num_samples ** 0.5), padding=2, pad_value=255)
     z_concat = torchvision.utils.make_grid(latent_z, nrow=int(num_samples ** 0.5), padding=2, pad_value=255)
     torchvision.utils.save_image(images_concat, save_dir+'/x.png')
@@ -300,26 +299,16 @@ def test(epoch, net, testloader, device, loss_fn, **args):
     torch.save(latent_z, f = save_dir+'/z.pkl')
 
     # dict keys as returned by "train"
-    train_loss = args['train_loss']
-    train_bpd = args['train_bpd']
+    train_loss = C['train_loss']
+    train_bpd = C['train_bpd']
     report = [epoch, loss_meter.avg, bpd_meter.avg] + [train_loss, train_bpd]
 
-    dir_samples = args['dir_samples']
+    dir_samples = C['dir_samples']
     with open('{}/log'.format(dir_samples), 'a') as l:
         report = ", ".join([str(m) for m in report])
         report += "\n"
         print("\nWriting to disk:\n" + report + "At {}".format(dir_samples))
         l.write(report)
-
-
-def filter_args(arg_dict, fields=None):
-    """only pass to network architecture relevant fields."""
-    if not fields:
-        # if arg_dict['net_type'] == 'resnet':
-        fields = ['net_type', 'num_scales', 'in_channels', 'mid_channels'] 
-        # elif arch['net_type'] == 'densenet':
-        # 	arch_fields = ['net_type', 'num_scales', 'in_channels', 'mid_channels', 'depth']
-    return {k:arg_dict[k] for k in fields if k in arg_dict}
 
 
 class GaussianNoise(object):
@@ -352,6 +341,11 @@ class Normie(object):
         return tensor
 
 def find_last_model_relpath(fp):
+    ''' Select epoch checkpoint or intermediate backup.
+    The euristic used in the filepath name of samples
+    args: root directory'''
+    # TODO: implement model loading + extraction of saved epoch from dictionary 
+    # in order to validate whether the model is the most up to date.
 
     dirs_l = os.listdir(fp)
     samples_l = os.listdir(fp + '/samples')
@@ -360,34 +354,20 @@ def find_last_model_relpath(fp):
     dirs_e.sort()
     samples_fns.sort()
     if dirs_e[-1] >= samples_fns[-1]:
-        return f'{fp}/epoch_{dirs_e[-1]}'
+        # checkpoint epoch
+        out = f'{fp}/epoch_{dirs_e[-1]}'
     else:
-        return fp
+        # output intermediate model dir.
+        # (backup for samples epochs with (n % 10000 == 0))
+        out = fp
+    return out
 
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Glow model')
-    parser.add_argument('--benchmark', action='store_true', help='Turn on CUDNN benchmarking')
-    # parser.add_argument('--num_epochs', default=100, type=int, help='Number of epochs to train')
 
-    # 4. GPUs
-    gpus_ = '[0, 1]' # if net_ == 'densenet' and dataset_=='mnist'  else '[0]' # 4.
-    # 5. resume training?
-    # 6. learning_rate
-
-    parser.add_argument('--sample_dir', default= root_dir_ +'/samples', help="Directory for storing generated samples")
-
-    # dataset
-    parser.add_argument('--dataset', '-ds', default=dataset_.lower(), type=str, help="MNIST or CIFAR-10")
-    parser.add_argument('--in_channels', default=in_channels_, type=int, help='dimensionality along Channels')
-
-    # architecture
-
-
-    from config.config import ConfWrap
-    C = ConfWrap(fn='config/config.yml')
-    C.resume = True # 5.
-    C.sample_dir = C.training.root_dir + '/samples'
-    best_loss = 5e5
+    C = ConfWrap(fn='config/config_eye.yml')
+    C.resume = True
+    C.training.sample_dir = C.training.root_dir + '/samples'
     main(C)
+
