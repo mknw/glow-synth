@@ -1,5 +1,5 @@
 import torch
-from torch import nn
+from torch import nn, sigmoid
 from torch.nn import functional as F
 from math import log, pi, exp
 import numpy as np
@@ -178,7 +178,7 @@ class AffineCoupling(nn.Module):
         if self.affine:
             log_s, t = self.net(in_a).chunk(2, 1)
             # s = torch.exp(log_s)
-            s = F.sigmoid(log_s + 2)
+            s = sigmoid(log_s + 2)
             # out_a = s * in_a + t
             out_b = (in_b + t) * s
 
@@ -197,7 +197,7 @@ class AffineCoupling(nn.Module):
         if self.affine:
             log_s, t = self.net(out_a).chunk(2, 1)
             # s = torch.exp(log_s)
-            s = F.sigmoid(log_s + 2)
+            s = sigmoid(log_s + 2)
             # in_a = (out_a - t) / s
             in_b = out_b / s - t
 
@@ -361,7 +361,9 @@ class Glow(nn.Module):
     def forward(self, input, reverse=False, resample=False, reconstruct=False, partition=False):
         if not reverse:
             if resample:
-                raise Exception('`reconstruct` only w/ `reverse` on. Use `partition` instead.')
+                raise Exception('`reconstruct=True` and `resample=True` only accepted in combination \
+                        with argument `reverse=True`. For reconstructing latent space from \
+                        image space, set `partition=True` and `reverse=False`.')
             if not partition:
                 log_p_sum = 0
                 logdet = 0
