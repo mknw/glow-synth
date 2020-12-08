@@ -17,6 +17,39 @@ from math import sqrt
 import random  
 
 
+def sample_celeba(batch, image_size, test=False):
+    if not test:
+        split = 'train'
+        shuffle = True
+        transform = transforms.Compose([
+            transforms.CenterCrop(160),
+            transforms.Resize(size=image_size),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize((0.5, 0.5, 0.5), (1, 1, 1)),
+        ])
+    else:
+        split = 'test'
+        transform = transforms.Compose([
+        transforms.CenterCrop(160),
+        transforms.Resize(size=image_size),
+        transforms.ToTensor(),
+        transforms.Normalize((0.5, 0.5, 0.5), (1, 1, 1)),
+    ])
+    print(f'shuffle set to {shuffle} for split: {split}')
+    target_type = ['attr', 'bbox', 'landmarks']
+    dataset = datasets.CelebA(root='data', split=split, target_type=target_type[0], download=True, transform=transform)
+    loader = DataLoader(dataset, batch_size=batch, shuffle=shuffle, num_workers=8)
+    loader = iter(loader)
+
+    while True:
+        try:
+            yield next(loader)
+        except StopIteration:
+            loader = DataLoader(dataset, batch_size=batch, shuffle=True, num_workers=8)
+            loader = iter(loader)
+            yield next(loader)
+
 def sample_from_directory(path, batch, image_size, test=False):
     if not test:
         shuffle = True

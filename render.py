@@ -63,7 +63,7 @@ def plot_pca(reduced_data, var_exp, category_array, category_map, filename, k=5)
     print(f'visualization saved to path: {filename}')
     plt.close()
 
-def save_dataset_reconstruction(x, reduced_data, model, attributes, n_samples=5):
+def save_dataset_reconstruction(x, reduced_data, attributes, n_samples=5):
     
     n_red = pca_reduced_z.shape[0]
     n_x = x.shape[0]
@@ -83,7 +83,6 @@ def save_dataset_reconstruction(x, reduced_data, model, attributes, n_samples=5)
 
     # run reconstruction on each selected z to obtain z_reduced
 
-    pass
 
 
 def plot_reconstruction(reduced_z, att, filename, n_examples, net, device,

@@ -1,0 +1,25 @@
+net:
+    arch: glow
+    # n_samples: 64
+    affine: True
+    lu_conv: True
+    n_flows: 8
+    n_blocks: 2
+    # temp: 0.75
+    gpus: [0, 1]
+
+training:
+    n_bits: 5
+    root_dir: data/glow_meyes512
+    dataset: meyes
+    in_channels: 3
+    img_size: 512
+    batch_size: 4
+    n_samples: 12
+    n_workers: 8
+    learning_rate: 0.0002
+    iter: 999999
+    temp: 0.7
+    benchmark: True
+resume: True
+

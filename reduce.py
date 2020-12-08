@@ -72,14 +72,6 @@ def analyse_epoch(C, model_meta_stuff = None):
         
         reducer = Synthesizer(C, steps = C.steps)
                               # net=net, device=device)
-        reducer.fit(data)
-        ''' x -> low_dim '''
-        # TODO: IN- and OUT- of set reduction / transformation.
-
-        # red_data = reducer.transform(data, show_steps='all')
-        # import ipdb; ipdb.set_trace()
-
-        var_exp_ratio = reducer.models['pca'].explained_variance_ratio_
         if save_cache:
             with open(cache_fn, 'wb') as f:
                 pickle.dump(attributes, f)
@@ -97,18 +89,49 @@ def analyse_epoch(C, model_meta_stuff = None):
     # reduced data here or inside the visualization function?
     # if inside, add k argument to save_dataset_reduction()
     # FOR NOW is inside plot_pca in render.py. Not too important anyway
+    import ipdb; ipdb.set_trace()
+    save_reconstr_v(data, reducer)
 
-    data_red = reducer.transform(data)
-    for i in range(0, 39, 5):
-
-        fns = [f'data/test/{i}_{models}_{version}_4.png' for version in ['legacy', 'new']]
-
-        # save_dataset_reduction(data_red, var_exp_ratio, attributes, k=10, att_ind=i, filename=fns[1])
-        save_dataset_reconstruction(data, data_red, model, attributes)
 
     
 
-    # rec_data = reducer.inverse_transform(red_data[-1], show_steps=-1)
+
+def pca_reduction(reducer, data):
+    # TODO move reducer.fit() method outside of function
+    reducer.fit(data)
+    ''' x -> low_dim '''
+    # TODO: IN- and OUT- of set reduction / transformation.
+    var_exp_ratio = reducer.models['pca'].explained_variance_ratio_
+    data_red = reducer.transform(data)
+    for i in range(0, 39, 5):
+        fns = [f'data/test/{i}_{models}_{version}_4.png' for version in ['legacy', 'new']]
+        save_dataset_reduction(data_red, var_exp_ratio, attributes, k=10, att_ind=i, filename=fns[1])
+
+
+def save_reconstr_v(data, reducer, split=0.99):
+    
+    ''' Save x's and z's, visualized pre (original) 
+    and post (reconstructed) dimensionality reduction.'''
+
+    size_fit = int(data.shape[0] * split)
+
+    reducer.fit(data[:size_fit].copy())
+
+    # `reduced_data` contains red. at different steps, if n_models > 1
+    reduced_data = reducer.transform(data[size_fit:].copy())
+
+    # reduced_data argument will need '-1' index once more models are added.
+    rec_data = reducer.inverse_transform(reduced_data, show_steps=-1)
+
+    # Take x, z, rec_x, rec_z, plot them.
+    # x: data <-- 
+    # z: red_data
+    # z': rec_data
+    # x': rec_rec_data <--
+    ''' right now we only have z and rec_z, add others. '''
+    n_red = pca_reduced_z.shape[0]
+    n_x = x.shape[0]
+    n_att = attributes.df.shape[0]
 
 
 
@@ -184,7 +207,7 @@ def plot_reduced_dataset(pca, z_s, att, k, att_ind, filename):
 if __name__ == '__main__':
     C = ConfWrap(fn='config/config.yml')
     # here only for compatibility:
-    C.data = ['z']
+    C.data = ['z'] #, 'x']
     # C.version = 'V-C.0'
     C.steps = ['pca']
     C.att_ind = 10
