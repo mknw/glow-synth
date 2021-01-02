@@ -3,6 +3,7 @@
 from itertools import product
 from load_data import Attributes
 from matplotlib import pyplot as plt
+import numpy as np
 
 '''PCA'''
 
@@ -85,6 +86,81 @@ def save_dataset_reconstruction(x, reduced_data, attributes, n_samples=5):
 
 
 
+def plot_compression_flow(data_arrays, filename, steps=None):
+    '''
+    Args: 
+        data_arrays containing: [x_s, z_s, PCs, UMAP_embeddings, rec_z, rec_x]
+    '''
+
+    from matplotlib.gridspec import GridSpec
+    # import ipdb; ipdb.set_trace()
+    # 2x3 quadrants. 
+    # x'  |<- rec_z  |<- umap_scatter|
+    # x ->|  z     ->|  eigenfaces ↑ |
+    fig = plt.figure(figsize=(10, 8))
+    gs = GridSpec(14, 9, fig) 
+
+    xs_axs = np.zeros((4, 4), dtype=object)
+    eigenf_axs= np.zeros((4, 4), dtype=object)
+    pca_axs = np.zeros((4, 4), dtype=object)
+    rec_z_axs = np.zeros((4, 4), dtype=object)
+    rec_x_axs = np.zeros((4, 4), dtype=object)
+
+    for i in range(4):
+        for j in range(4):
+            xs_axs[i,j] = fig.add_subplot(gs[i,j])
+            eigenf_axs[i,j] = fig.add_subplot(gs[5+i, j])
+            pca_axs[i,j] = fig.add_subplot(gs[10+i, j])
+            rec_z_axs[i,j]  = fig.add_subplot(gs[5+i, 5+j])
+            rec_x_axs[i,j]  = fig.add_subplot(gs[i, 5+j])
+
+    umap_emb_ax = fig.add_subplot(gs[10:, 5:])
+    # import ipdb; ipdb.set_trace()
+    # reformat images
+    axes = [xs_axs, eigenf_axs, pca_axs,  umap_emb_ax, rec_z_axs, rec_x_axs]
+
+
+    # always show X (last column)
+    for i, arr in enumerate(data_arrays):
+        # std = (i in [0, 5])
+        build_quadrant(arr, axes[i], i) # , std=False)
+
+    # build rectangles by providing gridspec?
+
+    plt.savefig(filename)
+    plt.close()
+    print(f'plot saved to: {filename}')
+
+
+def build_quadrant(data, axes, i, std=None):
+
+    if i in [3]: # pca, umap
+        try:
+            axes.scatter(data[:, 0], data[:, 1])
+        except:
+            import ipdb; ipdb.set_trace()
+        return
+
+    if i not in [3]: # setup image format.
+        if i in [1, 4]: # Z + rec_Z
+            d_min = data.min(1, keepdims=True)
+            d_std = data.std(1, keepdims=True)
+            data = (data - d_min) / d_std
+            d_max = data.max(1, keepdims=True)
+            data /= d_max
+            # import ipdb; ipdb.set_trace()
+        data = np.moveaxis(data.reshape(-1, 3, 64, 64), 1, -1)
+    
+    col_count = 0
+    for col in range(4):
+        for row in range(4):
+            img = data[row + 4*col_count].copy()
+            axes[col, row].imshow(img, interpolation='none')
+            axes[col, row].set(xticks=[], yticks=[])
+        col_count += 1
+
+
+
 def plot_reconstruction(reduced_z, att, filename, n_examples, net, device,
                          selected_attributes=5):
 
@@ -160,3 +236,39 @@ def plot_reconstruction(reduced_z, att, filename, n_examples, net, device,
     plt.close()
     pass
 
+def nul_fun():
+    ''' net '''
+    if 'net' in reducer.steps:
+        # show 'Z'
+        # append to v.
+        axs = build_quadrant(xs, axs, col=-1, n=10)
+        axs = build_quadrant(reduced_data[0], axs, n=10)
+
+    ''' pca '''
+    if 'pca' in reducer.steps:
+        # x' <- rec_z <- (cov.M * PCs) <- z <- x
+        # show eigenvectors
+        pass
+
+    ''' umap '''
+    if 'umap' in reducer.steps:
+    # x' <- rec_z <- (N-dim. w/ N << p) <- z <- x
+        pass
+
+    ''' MEMO: net + pca + umap '''
+    # x' <- rec_z <- (cov.M * PCs) <- (N-dim. w/ N << p) <- (PCA_reduction) <- z <- x
+
+    """ generation """
+    ''' pca '''
+    # x' <- rec_z <- (cov.M * PCs) <- random_z
+    ''' umap '''
+    # x' <- rec_z <- (N-dim. w/ N << p) <- (random N-dim vector)
+    ''' pca + umap '''
+    # x' <- rec_z <- (cov.M * PCs) <- (N-dim. w/ N << p) <- 
+
+    n_red = reduced_data.shape[0]
+    n_x = x.shape[0]
+
+    n_att = attributes.df.shape[0]
+    pass
+    

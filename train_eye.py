@@ -17,17 +17,16 @@ from model import Glow
 from tqdm import tqdm
 # from train_r import calc_z_shapes
 from shell_util import AverageMeter, bits_per_dim
-from reduce import load_network
+from load_data import load_network
 
 from config.config import ConfWrap
 
 def main(C):
 
-    import ipdb; ipdb.set_trace()
     if torch.cuda.is_available() and len(C.net.gpus) > 0:
-        if len(C.net.gpus) >= 2 and C.net.gpus == [0, 1]:
-            device_id = "cuda"
-        elif len(C.net.gpus) == 1 and C.net.gpus == [0]:
+        if len(C.net.gpus) >= 2: #  and C.net.gpus == [0, 1]:
+            device_id = "cuda:0"
+        elif len(C.net.gpus) == 1: # and C.net.gpus == [0]:
             device_id = "cuda:0"
     else:
         device_id = "cpu"
@@ -39,6 +38,7 @@ def main(C):
     # net, = load_network(model_fp, device, C.net)
     model = Glow(3, C.net.n_flows, C.net.n_blocks, affine=C.net.affine, conv_lu=C.net.lu_conv)
     net = model.to(device)
+    import ipdb; ipdb.set_trace()
     if str(device).startswith('cuda'):
         net = torch.nn.DataParallel(net, C.net.gpus)
         cudnn.benchmark = C.training.benchmark
@@ -46,7 +46,6 @@ def main(C):
     if C.resume: # or not C.resume:
         # Load checkpoint. TODO: uncomment last line, delete the next one
 
-        # import ipdb; ipdb.set_trace()
         C.model_dir = find_last_model_relpath(C.training.root_dir) # /model_{str(i + 1).zfill(6)}.pt'
         # C.model_dir = f'{C.root_dir}/epoch_180000'
         print(f'Resuming from checkpoint at {C.model_dir}')
@@ -112,10 +111,10 @@ def train(config, net, device, optimizer, start_epoch, z_sample):
     pbar = tqdm(range(start_epoch, config.iter))
     pbar.update(start_epoch); pbar.refresh()
     import ipdb; ipdb.set_trace()
+
     for i in pbar:
 
         x, _ = next(dataset)
-        torch.cuda.empty_cache()
         x = x.to(device)
 
         if i == 0:
@@ -173,38 +172,6 @@ def train(config, net, device, optimizer, start_epoch, z_sample):
 
         net.train()
 
-def sample_celeba(batch, image_size, test=False):
-    if not test:
-        split = 'train'
-        shuffle = True
-        transform = transforms.Compose([
-            transforms.CenterCrop(160),
-            transforms.Resize(size=image_size),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize((0.5, 0.5, 0.5), (1, 1, 1)),
-        ])
-    else:
-        split = 'test'
-        transform = transforms.Compose([
-        transforms.CenterCrop(160),
-        transforms.Resize(size=image_size),
-        transforms.ToTensor(),
-        transforms.Normalize((0.5, 0.5, 0.5), (1, 1, 1)),
-    ])
-    print(f'shuffle set to {shuffle} for split: {split}')
-    target_type = ['attr', 'bbox', 'landmarks']
-    dataset = datasets.CelebA(root='data', split=split, target_type=target_type[0], download=True, transform=transform)
-    loader = DataLoader(dataset, batch_size=batch, shuffle=shuffle, num_workers=8)
-    loader = iter(loader)
-
-    while True:
-        try:
-            yield next(loader)
-        except StopIteration:
-            loader = DataLoader(dataset, batch_size=batch, shuffle=True, num_workers=8)
-            loader = iter(loader)
-            yield next(loader)
 
 
 def find_or_make_z(path, C, img_size, n_flows, n_block, num_sample, t, device):
@@ -357,14 +324,20 @@ def find_last_model_relpath(fp):
     # TODO: implement model loading + extraction of saved epoch from dictionary 
     # in order to validate whether the model is the most up to date.
 
+    # ls_out = dict()
     dirs_l = os.listdir(fp)
     samples_l = os.listdir(fp + '/samples')
     dirs_e = [int(d.split('_')[-1]) for d in dirs_l if d.startswith('epoch_')]
     samples_fns = [int(png.split('.')[0]) for png in samples_l if png.endswith('png')]
     dirs_e.sort()
     samples_fns.sort()
+    dirs_e, samples_fns = [l if len(l) > 0 else [0] for l in [dirs_e, samples_fns]]
+    # Should stay `>=`
     if dirs_e[-1] >= samples_fns[-1]:
-        # checkpoint epoch
+        if dirs_e[-1] == -1 and samples_fns[-1] == -1:
+            # no model was saved.
+            raise ModelNotFoundError(f'no model checkpoint found in {fp}.')
+        # checkpoint @ epoch
         out = f'{fp}/epoch_{dirs_e[-1]}'
     else:
         # output intermediate model dir.
@@ -376,7 +349,7 @@ def find_last_model_relpath(fp):
 
 if __name__ == '__main__':
 
-    C = ConfWrap(fn='config/config_eye1024.yml')
+    C = ConfWrap(fn='config/config_1024b.yml')
     # C.resume = False
     C.training.sample_dir = C.training.root_dir + '/samples'
     main(C)

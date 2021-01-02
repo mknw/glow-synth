@@ -8,14 +8,14 @@ net:
 
 training:
     n_bits: 5
-    root_dir: data/glow_meyes1024
+    root_dir: data/glow_meyes1024b
     dataset: meyes
     in_channels: 3
     img_size: 1024
     batch_size: 2
     n_samples: 9
     n_workers: 8
-    learning_rate: 0.0002
+    learning_rate: 0.001
     iter: 999999
     temp: 0.7
     benchmark: True

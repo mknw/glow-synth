@@ -67,22 +67,23 @@ class  Synthesizer(object):
         # 2. scatter (2d and 3d UMAP)
         pass
 
-    def fit(self, data):
+    def fit(self, data, skip_l=['net']):
         ''' Main fit method .
         Args: 
             - data: numpy array of size (n x p) '''
         
         for step in self.steps:
-            if step == 'net':
-                if self.net_state == 'trained':
-                    continue
-            print(f'fitting {step}')
-            if step is not self.steps[-1]:
-                data = self.models[step].fit_transform(data)
+            if step in skip_l:
+                print(f'{step.capitalize()} already trained. Skipping..')
+                continue
             else:
-                self.models[step].fit(data)
+                print(f'fitting {step}')
+                if step is not self.steps[-1]:
+                    data = self.models[step].fit_transform(data)
+                else:
+                    self.models[step].fit(data)
 
-    def transform(self, data, show_steps='all'):
+    def transform(self, data, show_steps='all', skip_l=['net']):
         ''' Main transform method.
         Args:
             - data: numpy array of size (n x p), 
@@ -99,20 +100,24 @@ class  Synthesizer(object):
         out = list()
         
         for step in self.steps:
-
-            print(f'{step} transform')
-            if step == 'net':
-                data = self.net_infer(data)
+            if step in skip_l:
+                print(f'Skipping {step}...')
+                continue
             else:
-                data = self.models[step].transform(data)
+                print(f'{step.capitalize()} transform...', end='')
+                if step == 'net':
+                        data = self.net_infer(data)
+                else:
+                    data = self.models[step].transform(data)
 
-            if step in selected_steps:
-                out.append(data)
-                if len(selected_steps) == 1:
-                    return out[0]
+                if step in selected_steps:
+                    if len(selected_steps) == 1:
+                        return data
+                    else:
+                        out.append(data)
         return out
 
-    def inverse_transform(self, data, show_steps='all'):
+    def inverse_transform(self, data, show_steps='all', resample=True, skip_l=[None]):
         
         if isinstance(show_steps, int):
             show_steps = [show_steps]
@@ -125,17 +130,20 @@ class  Synthesizer(object):
         out = list()
 
         for step in reversed(self.steps):
-
-            print(f'inverse transforming {step}')
-            if step == 'net':
-                data = self.net_generate(data)
+            if step in skip_l:
+                print(f'Skipping {step}...')
+                continue
             else:
-                data = self.models[step].inverse_transform(data)
+                print(f'{step.capitalize()} inverse transform...', end='')
+                if step == 'net':
+                    data = self.net_generate(data, resample=resample)
+                else:
+                    data = self.models[step].inverse_transform(data)
 
-            if step in selected_steps:
-                out.append(data)
-                if len(selected_steps) == 1:
-                    return out[0]
+                if step in selected_steps:
+                    out.append(data)
+                    if len(selected_steps) == 1:
+                        return out[0]
         return out
     
     def net_infer(self, input_data):
@@ -167,9 +175,9 @@ class  Synthesizer(object):
             b = torch.from_numpy(batch).to(self.device)
             try:
                 log_p, log_det, imgs = self.models['net'](b)
-            except RuntimeError:
-                print(b.shape)
-                import ipdb; ipdb.set_trace()
+            except RuntimeError as re:
+                print(str(re), b.shape)
+                raise RuntimeError
 
             # reconstruct output data
             imgs = self.models['net'](
@@ -200,7 +208,6 @@ class  Synthesizer(object):
                                         ).to(self.device),
                                       partition=True
                                      )
-            import ipdb; ipdb.set_trace()
             # actual "inverse" transformation
             data = self.models['net'](
                                       data, 

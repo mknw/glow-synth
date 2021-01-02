@@ -2,22 +2,21 @@ net:
     arch: glow
     affine: True
     lu_conv: True
-    n_flows : 4
-    n_blocks : 3
+    n_flows : 16
+    n_blocks : 4
     gpus: [0, 1]
 
 training:
     n_bits: 5
-    root_dir: data/glow_meyes1024
-    dataset: meyes
+    root_dir: data/glow_ffhq128
+    dataset: ffhq
     in_channels: 3
-    img_size: 1024
-    batch_size: 2
+    img_size: 128
+    batch_size: 32
     n_samples: 9
     n_workers: 8
-    learning_rate: 0.0002
+    learning_rate: 0.0005
     iter: 999999
     temp: 0.7
     benchmark: True
 resume: True
-

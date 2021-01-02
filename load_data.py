@@ -1,7 +1,7 @@
 #!/var/scratch/mao540/miniconda3/envs/maip-venv/bin/python
 
 from torchvision import datasets
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, random_split
 from torchvision import transforms
 import torch
 import torchvision.transforms.functional as TF
@@ -39,21 +39,23 @@ def sample_celeba(batch, image_size, test=False):
     print(f'shuffle set to {shuffle} for split: {split}')
     target_type = ['attr', 'bbox', 'landmarks']
     dataset = datasets.CelebA(root='data', split=split, target_type=target_type[0], download=True, transform=transform)
-    loader = DataLoader(dataset, batch_size=batch, shuffle=shuffle, num_workers=8)
+    loader = DataLoader(dataset, batch_size=batch, shuffle=shuffle, num_workers=16)
     loader = iter(loader)
 
     while True:
         try:
             yield next(loader)
         except StopIteration:
-            loader = DataLoader(dataset, batch_size=batch, shuffle=True, num_workers=8)
+            loader = DataLoader(dataset, batch_size=batch, shuffle=True, num_workers=16)
             loader = iter(loader)
             yield next(loader)
 
-def sample_from_directory(path, batch, image_size, test=False):
+def sample_from_directory(path, batch, image_size, test=False, shuffle=False):
+    seed = 2147483647
+    torch.manual_seed(seed)
+
     if not test:
-        shuffle = True
-        split = 'whole dataset'
+        # train split
         transform = transforms.Compose([
             # transforms.CenterCrop(160),
             transforms.Resize(size=image_size),
@@ -62,24 +64,27 @@ def sample_from_directory(path, batch, image_size, test=False):
             transforms.Normalize((0.5, 0.5, 0.5), (1, 1, 1)),
         ])
     else:
-        split = 'test'
+        # test split
         transform = transforms.Compose([
-        # transforms.CenterCrop(160),
         transforms.Resize(size=image_size),
         transforms.ToTensor(),
         transforms.Normalize((0.5, 0.5, 0.5), (1, 1, 1)),
     ])
-    print(f'shuffle set to {shuffle} for split: {split}')
-    # target_type = ['attr', 'bbox', 'landmarks']
+
     dataset = datasets.ImageFolder(root = path, transform=transform)
-    loader = DataLoader(dataset, batch_size=batch, shuffle=shuffle, num_workers=8)
+    if not test:
+        dataset, _ = random_split(dataset, [65000, 5000])
+    else: 
+        _, dataset= random_split(dataset, [65000, 5000])
+
+    loader = DataLoader(dataset, batch_size=batch, shuffle=shuffle, num_workers=16)
     loader = iter(loader)
 
     while True:
         try:
             yield next(loader)
         except StopIteration:
-            loader = DataLoader(dataset, batch_size=batch, shuffle=shuffle, num_workers=8)
+            loader = DataLoader(dataset, batch_size=batch, shuffle=shuffle, num_workers=16)
             loader = iter(loader)
             yield next(loader)
 
@@ -100,7 +105,7 @@ def sample_FFHQ_eyes(batch, image_size, degrees=90, transform=None, shuffle=True
         try:
             yield next(loader)
         except StopIteration:
-            loader = DataLoader(dataset, batch_size=batch, shuffle=True) # , num_workers=16)
+            loader = DataLoader(dataset, batch_size=batch, shuffle=True, num_workers=16)
             loader = iter(loader)
             yield next(loader)
 
@@ -608,7 +613,6 @@ class Attributes:
         else:
             raise TypeError(f'Expected arg. idxs of type: int or list, got {type(idxs)}')
 
-        # selection = self.df.iloc[:, np.array(idxs)]
         if complementary:
             if isinstance(idxs, int):
                 attribute_names = [selection.name]
@@ -622,6 +626,30 @@ class Attributes:
             index_all = (selection== 1).any(axis=1)
             selection = pd.concat([selection, index_all], axis=1)
         return selection
+
+    def pick_last_n_per_attribute(self, idxs, n=1):
+        # select one or more attribute,
+        df1 = self.subset(idxs)
+        attr_last_idcs = dict()
+        prev_idcs = set()
+
+        for col in df1.columns:
+            count = n
+            # column_idxs = df1.iloc[::-1, c_i].nlargest(n)
+            column_idxs = list(df1[col][::-1].nlargest(count).index)
+
+            while prev_idcs.intersection(set(column_idxs)):
+                # while any(idx in column_idxs for prev_idx in attr_last_idcs):
+                count += 1
+                column_idxs = list(df1[col][::-1].nlargest(count).index)
+                column_idxs = column_idxs[count-n:]
+
+            attr_last_idcs[col] = column_idxs
+            prev_idcs = prev_idcs | set(column_idxs)
+
+        df = pd.DataFrame(attr_last_idcs)
+        df.columns = df1.columns
+        return df, list(prev_idcs)
 
 
     def categorise(self, attribute_subset):

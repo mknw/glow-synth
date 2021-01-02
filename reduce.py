@@ -1,4 +1,6 @@
-#!/var/scratch/mao540/miniconda3/envs/maip-venv/bin/python
+#!/bin/env /var/scratch/mao540/miniconda3/envs/maip-venv/bin/python
+
+#/var/scratch/mao540/miniconda3/envs/maip-venv/bin/python
 # maybe
 
 import torch 
@@ -15,7 +17,7 @@ from synthesyzer  import Synthesizer
 from utils import ArchError
 from load_data import load_network, Attributes, select_model
 import pickle
-from render import save_dataset_reduction
+from render import save_dataset_reduction, plot_compression_flow
 import numpy as np
 
 def main(C, epochs=[160000], save=True):
@@ -49,55 +51,49 @@ def analyse_epoch(C, model_meta_stuff = None):
     maketree = lambda l: [os.makedirs(p, exist_ok=True) for p in lstify(l)]
     maketree(compr_fp)
     
-    if not cached:
+    if not use_cache:
 
-        if 'net' in C.steps:
-            if 'net' not in dir():
-                net, _ = load_network( model_fp, device, C.net)
-                net.eval()
+        if 'net' in C.steps and \
+            'net' not in dir():
+            net, _ = load_network( model_fp, device, C.net)
+            net.eval()
 
-        print(f'Loading cached `{C.data}`, skipping computations of mean and std... ',
+        print(f'Loading use_cache `{C.data}`, skipping computations of mean and std... ',
                 end='')
+
+        # import ipdb; ipdb.set_trace()
+        
+        reducer = Synthesizer(C, steps = C.steps,
+                              net=net, device=device)
+        if save_cache:
+            # with open(cache_fn, 'wb') as f:
+            # 	pickle.dump(attributes, f)
+            # pickle.dump(red_data, f)
+            # pickle.dump(var_exp_ratio, f)
+            pass
+
         dataset = dict()
         if 'z' in C.data:
             dataset['z'] = torch.load(f'{model_root_fp}/z_mean_std.pkl')['z']
-            data = dataset['z'].reshape(dataset['z'].shape[0], -1)
+            data_z = dataset['z'].reshape(dataset['z'].shape[0], -1)
         if 'x' in C.data:
             dataset['x'] = torch.load(f'{C.training.root_dir}/x.pkl')['x']
-            data = dataset['x'].reshape(dataset['x'].shape[0], -1)
+            data_x = dataset['x'].reshape(dataset['x'].shape[0], -1)
         print(f'`{C.data}` stats loaded.')
+    attributes = Attributes().fetch()
 
-        attributes = Attributes().fetch()
-        # import ipdb; ipdb.set_trace()
-        
-        reducer = Synthesizer(C, steps = C.steps)
-                              # net=net, device=device)
-        if save_cache:
-            with open(cache_fn, 'wb') as f:
-                pickle.dump(attributes, f)
-                pickle.dump(red_data, f)
-                pickle.dump(var_exp_ratio, f)
-
+    # import ipdb; ipdb.set_trace()
+    if use_cache:
+        save_reconstr_v(attributes,use_cache=use_cache,save_cache=save_cache)
     else:
-        # with open(cache_fn, 'rb') as f:
-            # attributes = pickle.load(f)
-            # red_data = pickle.load(f)
-            # var_exp_ratio = pickle.load(f)
-        pass
+        save_reconstr_v(attributes, data_z, data_x, reducer,
+                        use_cache=use_cache, save_cache=save_cache)
 
-    # Should we select the number of component as second dimension of 
-    # reduced data here or inside the visualization function?
-    # if inside, add k argument to save_dataset_reduction()
-    # FOR NOW is inside plot_pca in render.py. Not too important anyway
-    import ipdb; ipdb.set_trace()
-    save_reconstr_v(data, reducer)
-
-
-    
 
 
 def pca_reduction(reducer, data):
-    # TODO move reducer.fit() method outside of function
+    # TODO 1 move reducer.fit() method outside of function
+    # TODO 2 test for cases where len(att_ind) > 1.
     reducer.fit(data)
     ''' x -> low_dim '''
     # TODO: IN- and OUT- of set reduction / transformation.
@@ -107,34 +103,62 @@ def pca_reduction(reducer, data):
         fns = [f'data/test/{i}_{models}_{version}_4.png' for version in ['legacy', 'new']]
         save_dataset_reduction(data_red, var_exp_ratio, attributes, k=10, att_ind=i, filename=fns[1])
 
-
-def save_reconstr_v(data, reducer, split=0.99):
+def save_reconstr_v(attributes, data=None, data_x=None, reducer=None,
+                     split=0.99, use_cache=False, save_cache=False):
     
     ''' Save x's and z's, visualized pre (original) 
     and post (reconstructed) dimensionality reduction.'''
 
-    size_fit = int(data.shape[0] * split)
+    # select attributes
+    if not use_cache:
+        att_ind = list(range(16))
+        kept_out_df, kept_out_idcs = attributes.pick_last_n_per_attribute(att_ind)
 
-    reducer.fit(data[:size_fit].copy())
+        # split dataset
+        z_s = data[kept_out_idcs].copy()
+        x_s = data_x[kept_out_idcs].copy()
+        del data_x
 
-    # `reduced_data` contains red. at different steps, if n_models > 1
-    reduced_data = reducer.transform(data[size_fit:].copy())
+        training_data = np.delete(data, kept_out_idcs, axis=0)
+        try:
+            reducer.fit(training_data)
+        except:
+            import ipdb; ipdb.set_trace()
+        del training_data
 
-    # reduced_data argument will need '-1' index once more models are added.
-    rec_data = reducer.inverse_transform(reduced_data, show_steps=-1)
 
+        # TODO: replace show_steps arguments with argument selection
+        red_data = reducer.transform(z_s, show_steps='all')
+
+        # inv_transform argument will need '-1' index once more models are added.
+        rec_data = reducer.inverse_transform(red_data[-1], show_steps='all') # TODO: RESAMPLE=FALSE
+
+        # step_vector is equal to: [x_s, z_s, PCs, UMAP_embeddings, rec_z, rec_x]
+        step_vector = [x_s, z_s] + [reducer.models['pca'].components_] + rec_data
+        
+        if save_cache:
+            with open(cache_fn, 'wb') as f:
+                pickle.dump(step_vector, f)
+    else:
+        with open(cache_fn, 'rb') as f:
+            step_vector = pickle.load(f)
+
+
+    filename = C.training.root_dir + '/103hiplot.png'
+    plot_compression_flow(step_vector, filename)
+    
+    print('done.')
+    # concatenate all steps
+    
+    # show x' on the left, x on the right, steps throughout
     # Take x, z, rec_x, rec_z, plot them.
-    # x: data <-- 
-    # z: red_data
-    # z': rec_data
-    # x': rec_rec_data <--
-    ''' right now we only have z and rec_z, add others. '''
-    n_red = pca_reduced_z.shape[0]
-    n_x = x.shape[0]
-    n_att = attributes.df.shape[0]
-
-
-
+    # x: data            <--
+    # z: reduced_data    <--
+    #    - z (net output)
+    #    - z (pca red / eigenfaces)
+    #    - z (umap reduction / 2-dim. cluster)
+    # z': rec_data       <--
+    # x': rec_rec_data   <--very last layer of reconstruction (inv.trasnform)
 
 def plot_reduced_dataset(pca, z_s, att, k, att_ind, filename):
     # sort from highest variance
@@ -205,13 +229,13 @@ def plot_reduced_dataset(pca, z_s, att, k, att_ind, filename):
 
 
 if __name__ == '__main__':
-    C = ConfWrap(fn='config/config.yml')
+    C = ConfWrap(fn='config/r_config.yml')
     # here only for compatibility:
-    C.data = ['z'] #, 'x']
+    C.data = ['z' , 'x']
     # C.version = 'V-C.0'
-    C.steps = ['pca']
-    C.att_ind = 10
-    cached = False
+    C.steps = ['net', 'pca', 'umap']
+    # C.att_ind = 10
+    use_cache = True
     save_cache = False
 
     models = '-'.join(C.steps)
@@ -220,6 +244,6 @@ if __name__ == '__main__':
 
     models = '_'.join([models, pca_params, data_steps])
     # fns = [f'data/test/{models}_{version}_4.png' for version in ['legacy', 'new']]
-    # cache_fn = f'data/hybrid_full.pkl'
+    cache_fn = f'data/glow_celeba/r_vector.pkl'
 
     main(C)

@@ -1,0 +1,23 @@
+# deprecated by LU version
+net:
+    arch: glow
+    affine: False
+    lu_conv: True
+    n_flows : 32
+    n_blocks : 4
+    gpus: [0, 1]
+
+training:
+    n_bits: 5
+    root_dir: data/glow_ffhq
+    dataset: ffhq
+    in_channels: 3
+    img_size: 256
+    batch_size: 4
+    n_samples: 25
+    n_workers: 16
+    learning_rate: 0.0005
+    iter: 999999
+    temp: 0.7
+    benchmark: True
+resume: True
