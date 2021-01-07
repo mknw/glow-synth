@@ -37,7 +37,7 @@ class  Synthesizer(object):
             assert net is not None, 'net object not provided.'
             assert steps.index('net') == 0, 'Net must be first, if present.'
             self.models['net'] = net
-            self.net_state = 'trained'
+            # self.net_state = 'trained'
             steps = steps[1:]
             if device is not None:
                 self.device = device
@@ -46,7 +46,8 @@ class  Synthesizer(object):
 
         for step in steps:
             if step == 'pca':
-                self.models[step] = PCA(n_components=C.pca.n_pcs, whiten = C.pca.whiten, random_state=36)
+                self.models[step] = PCA(n_components=C.pca.n_pcs, whiten = C.pca.whiten,
+                                          random_state=42)
             if step == 'umap':
                 self.models[step] = UMAP(n_neighbors = C.umap.nn, min_dist = C.umap.min_dist,
                                 n_components = C.umap.n_components, random_state=42)

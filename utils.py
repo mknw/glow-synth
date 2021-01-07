@@ -97,5 +97,20 @@ class ArchError(Exception):
             self.message = message
 
 
+class ModelNotFoundError(Exception):
+    def __init__(self, path, message=None):
+        self.path = path
+
+        if message is not None:
+            self.message = "Model not found. Change `resume` parameter to False?"
+        self.path = path
+
+        super().__init__(self.message)
+    
+    def __str__(self):
+        return f'{self.path} -> {self.message}'
+
+
+
 if __name__ == '__main__':
     raise NotImplementedError

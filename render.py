@@ -86,7 +86,7 @@ def save_dataset_reconstruction(x, reduced_data, attributes, n_samples=5):
 
 
 
-def plot_compression_flow(data_arrays, filename, steps=None):
+def plot_compression_flow(data_arrays, filename):
     '''
     Args: 
         data_arrays containing: [x_s, z_s, PCs, UMAP_embeddings, rec_z, rec_x]
@@ -97,58 +97,142 @@ def plot_compression_flow(data_arrays, filename, steps=None):
     # 2x3 quadrants. 
     # x'  |<- rec_z  |<- umap_scatter|
     # x ->|  z     ->|  eigenfaces ↑ |
-    fig = plt.figure(figsize=(10, 8))
-    gs = GridSpec(14, 9, fig) 
+    fig = plt.figure(figsize=(12, 16))
+    gs = GridSpec(3, 2, figure=fig) 
 
     xs_axs = np.zeros((4, 4), dtype=object)
     eigenf_axs= np.zeros((4, 4), dtype=object)
     pca_axs = np.zeros((4, 4), dtype=object)
     rec_z_axs = np.zeros((4, 4), dtype=object)
     rec_x_axs = np.zeros((4, 4), dtype=object)
+    # import ipdb; ipdb.set_trace()
+    # first column
+    gs00 = gs[0,0].subgridspec(4, 4, wspace=0.3, hspace=0.3)
+    gs10 = gs[1,0].subgridspec(4, 4, wspace=0.3, hspace=0.3)
+    gs20 = gs[2,0].subgridspec(4, 4, wspace=0.3, hspace=0.3)
+    # second column
+    gs01 = gs[0,1].subgridspec(4, 4, wspace=0.3, hspace=0.3)
+    gs11 = gs[1,1].subgridspec(4, 4, wspace=0.3, hspace=0.3)
+
+    # reserved for umap proj.
+    # gs12 = gs[1,2].subgridspec(4, 4) 
+    umap_emb_ax = fig.add_subplot(gs[2,1]) # Single scatter now.
 
     for i in range(4):
         for j in range(4):
-            xs_axs[i,j] = fig.add_subplot(gs[i,j])
-            eigenf_axs[i,j] = fig.add_subplot(gs[5+i, j])
-            pca_axs[i,j] = fig.add_subplot(gs[10+i, j])
-            rec_z_axs[i,j]  = fig.add_subplot(gs[5+i, 5+j])
-            rec_x_axs[i,j]  = fig.add_subplot(gs[i, 5+j])
+            xs_axs[i,j] = fig.add_subplot(gs00[i,j])
+            eigenf_axs[i,j] = fig.add_subplot(gs10[i, j])
+            pca_axs[i,j] = fig.add_subplot(gs20[i, j])
+            rec_z_axs[i,j]  = fig.add_subplot(gs11[i, j])
+            rec_x_axs[i,j]  = fig.add_subplot(gs01[i, j])
 
-    umap_emb_ax = fig.add_subplot(gs[10:, 5:])
-    # import ipdb; ipdb.set_trace()
     # reformat images
+    steps = ['X', 'Eigenfaces', 'First PCs', 'UMAP projection', 'Rec_Z', 'Rec_X']
     axes = [xs_axs, eigenf_axs, pca_axs,  umap_emb_ax, rec_z_axs, rec_x_axs]
+    arrays_axes = [dict([['arr', arr], ['ax', ax]]) for arr, ax in zip(data_arrays, axes)]
+    steps_arrays_axes = {k: v for k, v in zip(steps, arrays_axes)}
 
+    for (step, values) in steps_arrays_axes.items():
+        build_quadrant(step, values['arr'], values['ax'])
 
-    # always show X (last column)
-    for i, arr in enumerate(data_arrays):
-        # std = (i in [0, 5])
-        build_quadrant(arr, axes[i], i) # , std=False)
+    import matplotlib.patches as patches
 
-    # build rectangles by providing gridspec?
+    # TODO: instead of patching figure with 1 axes, 
+    # we create 1 ax per higher specgrid item.
+    ax_over = plt.axes([0,0,1,1], facecolor=(1,1,1,0))
+
+    rect = patches.Rectangle((0.07, 0.05), 0.85, 0.9, linewidth=1,
+                             edgecolor='r', facecolor='none')
+    ax_over.add_patch(rect)
+
 
     plt.savefig(filename)
     plt.close()
     print(f'plot saved to: {filename}')
 
 
-def build_quadrant(data, axes, i, std=None):
+def plot_compression_flow_pca(data_arrays, filename):
+    '''
+    Args: 
+        data_arrays containing: [x_s, z_s, PCs, UMAP_embeddings, rec_z, rec_x]
+    '''
 
-    if i in [3]: # pca, umap
+    from matplotlib.gridspec import GridSpec
+    # import ipdb; ipdb.set_trace()
+    # 2x3 quadrants. 
+    # x'  |<- rec_z  |<- umap_scatter|
+    # x ->|  z     ->|  eigenfaces ↑ |
+    fig = plt.figure(figsize=(12, 16))
+    gs = GridSpec(3, 2, figure=fig) 
+
+    xs_axs = np.zeros((4, 4), dtype=object)
+    eigenf_axs= np.zeros((4, 4), dtype=object)
+    pca_axs = np.zeros((4, 4), dtype=object)
+    rec_z_axs = np.zeros((4, 4), dtype=object)
+    rec_x_axs = np.zeros((4, 4), dtype=object)
+    # import ipdb; ipdb.set_trace()
+    # first column
+    gs00 = gs[0,0].subgridspec(4, 4, wspace=0.3, hspace=0.3)
+    gs10 = gs[1,0].subgridspec(4, 4, wspace=0.3, hspace=0.3)
+    gs20 = gs[2,0].subgridspec(4, 4, wspace=0.3, hspace=0.3)
+    # second column
+    gs01 = gs[0,1].subgridspec(4, 4, wspace=0.3, hspace=0.3)
+    gs11 = gs[1,1].subgridspec(4, 4, wspace=0.3, hspace=0.3)
+
+    # reserved for umap proj.
+    # gs12 = gs[1,2].subgridspec(4, 4) 
+    umap_emb_ax = fig.add_subplot(gs[2,1]) # Single scatter now.
+
+    for i in range(4):
+        for j in range(4):
+            xs_axs[i,j] = fig.add_subplot(gs00[i,j])
+            eigenf_axs[i,j] = fig.add_subplot(gs10[i, j])
+            pca_axs[i,j] = fig.add_subplot(gs20[i, j])
+            rec_z_axs[i,j]  = fig.add_subplot(gs11[i, j])
+            rec_x_axs[i,j]  = fig.add_subplot(gs01[i, j])
+
+    # reformat images
+    steps = ['X', 'Eigenfaces', 'First PCs', 'UMAP projection', 'Rec_Z', 'Rec_X']
+    axes = [xs_axs, eigenf_axs, pca_axs,  umap_emb_ax, rec_z_axs, rec_x_axs]
+    arrays_axes = [dict([['arr', arr], ['ax', ax]]) for arr, ax in zip(data_arrays, axes)]
+    steps_arrays_axes = {k: v for k, v in zip(steps, arrays_axes)}
+
+    for (step, values) in steps_arrays_axes.items():
+        build_quadrant(step, values['arr'], values['ax'])
+
+    import matplotlib.patches as patches
+
+    # TODO: instead of patching figure with 1 axes, 
+    # we create 1 ax per higher specgrid item.
+    ax_over = plt.axes([0,0,1,1], facecolor=(1,1,1,0))
+
+    rect = patches.Rectangle((0.07, 0.05), 0.85, 0.9, linewidth=1,
+                             edgecolor='r', facecolor='none')
+    ax_over.add_patch(rect)
+
+
+    plt.savefig(filename)
+    plt.close()
+    print(f'plot saved to: {filename}')
+
+def build_quadrant(step, data, axes): # , std=None):
+
+    # if i in [3]: # pca, umap
+    if step.lower().startswith('umap'):
         try:
             axes.scatter(data[:, 0], data[:, 1])
         except:
             import ipdb; ipdb.set_trace()
         return
 
-    if i not in [3]: # setup image format.
-        if i in [1, 4]: # Z + rec_Z
+    else:
+        # if step.lower() in ['eigenfaces', 'rec_z']:
+        if step.lower() not in ['first pcs', 'umap projection']:
             d_min = data.min(1, keepdims=True)
-            d_std = data.std(1, keepdims=True)
-            data = (data - d_min) / d_std
+            # d_std = data.std(1, keepdims=True)
             d_max = data.max(1, keepdims=True)
-            data /= d_max
-            # import ipdb; ipdb.set_trace()
+            data = (data - d_min) / d_max
+
         data = np.moveaxis(data.reshape(-1, 3, 64, 64), 1, -1)
     
     col_count = 0
