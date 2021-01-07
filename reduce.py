@@ -30,21 +30,17 @@ def main(C, epochs=[160000], save=True):
 
         # if not os.path.isfile(pcount_fn) or force or C.kde:
         # import ipdb; ipdb.set_trace()
-        for resample in [True, False]:
-            for kept_out in [True, False]:
-                for steps in [['net', 'pca'],['net','pca','umap']]:
-                    for pca_npcs in [int(np.exp(i)) for i in range(3,10)]:
-                        for umap_npcs in [10, 20, 50]:
-                            C.pca.n_pcs = pca_npcs
-                            C.umap.n_components = umap_npcs
-                            C.resample = resample
-                            C.kept_out = kept_out
-                            C.steps = steps
-                            try:
-                                analyse_epoch(C, model_meta_stuff)
-                            except:
-                                print(f'failed to compute pca: {pca_npcs}, umap: {umap_npcs}')
-                                pass
+        for kept_out in [True, False]:
+            for steps in [['net', 'pca'],['net','pca','umap']]:
+                for pca_npcs in [int(np.exp(i)) for i in range(3,10)]:
+                    for umap_npcs in [10, 20, 50]:
+                        C.pca.n_pcs = pca_npcs
+                        C.umap.n_components = umap_npcs
+                        C.kept_out = kept_out
+                        C.steps = steps
+                        analyse_epoch(C, model_meta_stuff)
+                        print(f'failed to compute pca: {pca_npcs}, umap: {umap_npcs}')
+                        pass
         # mark_version(C.version, vmarker_fp, finish=True) # echo '0.2' >> vmarker_fp
 
 
@@ -114,7 +110,6 @@ def make_basename(C, withtime=False):
         import datetime as dt
         time += str(dt.datetime.now()).split(sep='.')[0].replace('2021-', '').replace(' ', '_')
     basename = f'{C.training.root_dir}/reupsam'
-    maketree(basename)
     basename += f'/{time}syn'
     if 'umap' in C.steps:
         basename += f'_uc{C.umap.n_components}'
@@ -137,17 +132,16 @@ def pca_reduction(reducer, data):
 
 def save_reconstr_v(attributes, data=None, data_x=None, reducer=None,
                       use_cache=False, save_cache=False, basename=None, ko=True,
-                            resample=False):
+                            resample=True):
     
     ''' Save x's and z's, visualized pre (original) 
     and post (reconstructed) dimensionality reduction.'''
 
     import random 
-    att_ind = random.randint(0, 40)
-    res = 'res' if resample else 'no-res'
-    ko = 'ko' if resample else 'no-ko'
-    filename = f'{basename}_{att_ind}_{res}_{ko}.png'
-    cache_fn = f'{basename}_{att_ind}_{res}_{ko}.pkl'
+    att_ind = random.randint(0, 39)
+    ko = 'ko' if ko else 'no-ko'
+    filename = f'{basename}_{att_ind}_{ko}.png'
+    cache_fn = f'{basename}_{att_ind}_{ko}.pkl'
 
     # select attributes
     if not use_cache:

@@ -632,6 +632,8 @@ class Attributes:
         df1 = self.subset(idxs)
         attr_last_idcs = dict()
         prev_idcs = set()
+        if not isinstance(df1, pd.DataFrame):
+            df1 = pd.DataFrame(df1)
 
         for col in df1.columns:
             count = n
