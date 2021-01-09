@@ -1,0 +1,22 @@
+net:
+    arch: glow
+    affine: True
+    lu_conv: True
+    n_flows : 32
+    n_blocks : 4
+    gpus: [0, 1]
+
+training:
+    n_bits: 5
+    root_dir: data/glow_ffhq
+    dataset: ffhq
+    in_channels: 3
+    img_size: 64
+    batch_size: 128
+    n_samples: 9
+    n_workers: 8
+    learning_rate: 0.001
+    iter: 999999
+    temp: 0.7
+    benchmark: True
+resume: False

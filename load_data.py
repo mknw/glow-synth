@@ -632,6 +632,7 @@ class Attributes:
         df1 = self.subset(idxs)
         attr_last_idcs = dict()
         prev_idcs = set()
+        prev_idxs_list = list()
         if not isinstance(df1, pd.DataFrame):
             df1 = pd.DataFrame(df1)
 
@@ -648,10 +649,11 @@ class Attributes:
 
             attr_last_idcs[col] = column_idxs
             prev_idcs = prev_idcs | set(column_idxs)
+            prev_idxs_list.append(column_idxs) # lists preserve order.
 
         df = pd.DataFrame(attr_last_idcs)
         df.columns = df1.columns
-        return df, list(prev_idcs)
+        return df, prev_idxs_list
 
 
     def categorise(self, attribute_subset):

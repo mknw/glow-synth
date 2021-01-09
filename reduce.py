@@ -27,24 +27,25 @@ def main(C, epochs=[160000], save=True):
         model_meta_stuff = select_model(C.training.root_dir, test_epoch=e)
         # model_root_fp, model_fp, vmarker_fp = model_meta_stuff
         # mark_version(C.version, vmarker_fp) # echo '\nV-' >> vmarker_fp
-
-        # if not os.path.isfile(pcount_fn) or force or C.kde:
-        # import ipdb; ipdb.set_trace()
         for kept_out in [True, False]:
-            for steps in [['net', 'pca'],['net','pca','umap']]:
+            C.kept_out = kept_out
+            for steps in [['net', 'pca', 'umap'],['net','pca']]:
+                C.steps = steps
+
                 for pca_npcs in [int(np.exp(i)) for i in range(3,10)]:
-                    for umap_npcs in [10, 20, 50]:
-                        C.pca.n_pcs = pca_npcs
+                    C.pca.n_pcs = pca_npcs
+
+                    if 'umap' in steps:
+                        umap_npcs_l = [10, 20, 50]
+                    else:
+                        umap_npcs_l = ['empty']
+                    for umap_npcs in umap_npcs_l:
                         C.umap.n_components = umap_npcs
-                        C.kept_out = kept_out
-                        C.steps = steps
-                        analyse_epoch(C, model_meta_stuff)
-                        print(f'failed to compute pca: {pca_npcs}, umap: {umap_npcs}')
-                        pass
+                        analyse_synthesizer(C, model_meta_stuff)
         # mark_version(C.version, vmarker_fp, finish=True) # echo '0.2' >> vmarker_fp
 
 
-def analyse_epoch(C, model_meta_stuff = None):
+def analyse_synthesizer(C, model_meta_stuff = None):
     device = torch.device("cuda:0" if torch.cuda.is_available() and len(C.net.gpus) > 0 else "cpu")
     # print("Device: %s" % device)
     
@@ -62,10 +63,7 @@ def analyse_epoch(C, model_meta_stuff = None):
     maketree = lambda l: [os.makedirs(p, exist_ok=True) for p in lstify(l)]
     maketree(compr_fp)
 
-    
-    
-    if not use_cache:
-
+    if not C.use_cache:
         if 'net' in C.steps and \
             'net' not in dir():
             net, _ = load_network( model_fp, device, C.net)
@@ -73,18 +71,8 @@ def analyse_epoch(C, model_meta_stuff = None):
 
         print(f'Loading use_cache `{C.data}`, skipping computations of mean and std... ',
                 end='')
-
-        # import ipdb; ipdb.set_trace()
-        
         reducer = Synthesizer(C, steps = C.steps,
                               net=net, device=device)
-        if save_cache:
-            # with open(cache_fn, 'wb') as f:
-            # 	pickle.dump(attributes, f)
-            # pickle.dump(red_data, f)
-            # pickle.dump(var_exp_ratio, f)
-            pass
-
         dataset = dict()
         if 'z' in C.data:
             dataset['z'] = torch.load(f'{model_root_fp}/z_mean_std.pkl')['z']
@@ -95,14 +83,11 @@ def analyse_epoch(C, model_meta_stuff = None):
         print(f'`{C.data}` stats loaded.')
     attributes = Attributes().fetch()
 
-    # import ipdb; ipdb.set_trace()
-    basename = make_basename(C)
-    if use_cache:
-        save_reconstr_v(attributes,use_cache=use_cache,save_cache=save_cache,
-                basename=basename)
+    C.basename = make_basename(C)
+    if C.use_cache:
+        save_reconstr_v(C, attributes)
     else:
-        save_reconstr_v(attributes, data_z, data_x, reducer,
-                        use_cache=use_cache, save_cache=save_cache, basename=basename)
+        save_reconstr_v(C, attributes, data_z, data_x, reducer)
 
 def make_basename(C, withtime=False):
     time = ''
@@ -130,65 +115,52 @@ def pca_reduction(reducer, data):
         fns = [f'data/test/{i}_{models}_{version}_4.png' for version in ['legacy', 'new']]
         save_dataset_reduction(data_red, var_exp_ratio, attributes, k=10, att_ind=i, filename=fns[1])
 
-def save_reconstr_v(attributes, data=None, data_x=None, reducer=None,
-                      use_cache=False, save_cache=False, basename=None, ko=True,
-                            resample=True):
+def save_reconstr_v(C, attributes, data=None, data_x=None, reducer=None):
     
     ''' Save x's and z's, visualized pre (original) 
     and post (reconstructed) dimensionality reduction.'''
 
     import random 
-    att_ind = random.randint(0, 39)
-    ko = 'ko' if ko else 'no-ko'
-    filename = f'{basename}_{att_ind}_{ko}.png'
-    cache_fn = f'{basename}_{att_ind}_{ko}.pkl'
+    # blond vs brown air, smiling vs. wearing hat.
+    att_ind = [5, 11, 31, 35]
+    ko = '_ko' if C.kept_out else ''
+    filename = f'{C.basename}_{att_ind}{ko}.png'
+    cache_fn = f'{C.basename}_{att_ind}{ko}.pkl'
 
     # select attributes
-    if not use_cache:
+    if not C.use_cache:
         # att_ind = list(range(0, 40, 10))
-        kept_out_df, kept_out_idcs = attributes.pick_last_n_per_attribute(att_ind, n=16)
-
+        kept_out_df, kept_out_idcs = attributes.pick_last_n_per_attribute(att_ind, n=4)
         # split dataset
         z_s = data[kept_out_idcs].copy()
         x_s = data_x[kept_out_idcs].copy()
+        att_names = list(kept_out_df.columns)
 
-        if ko:
+        if C.kept_out:
             training_data = np.delete(data, kept_out_idcs, axis=0)
         else:
             training_data = data.copy()
-
         del data_x; del data
-        try:
-            # fit PCA (and UMAP)
-            reducer.fit(training_data)
-        except:
-            import ipdb; ipdb.set_trace()
+        reducer.fit(training_data)
         del training_data
-
-
         # TODO: replace show_steps arguments with argument selection
         red_data = reducer.transform(z_s, show_steps='all')
-
         # the last element of red(uced)_data is the lower level representation.
         rec_data = reducer.inverse_transform(red_data[-1], show_steps='all',
-                                          resample=resample)
-
-        # step_vector is equal to: [x_s, z_s, PCs, UMAP_embeddings, rec_z, rec_x]
-        step_vector = [x_s, z_s] + [reducer.models['pca'].components_] + rec_data
-        if 'umap' not in C.steps:
-            # placeholder vector.
+                                          resample=C.training.resample)
+        if 'umap' in C.steps:
+            step_vector = [x_s, z_s] + red_data + rec_data[1:]
+        else:
             step_vector = [x_s, z_s] + [reducer.models['pca'].components_] \
-                          + [reducer.models['pca'].components_] + rec_data
-        
-        if save_cache:
+                           + red_data + rec_data
+        if C.save_cache:
             with open(cache_fn, 'wb') as f:
                 pickle.dump(step_vector, f)
     else:
         with open(cache_fn, 'rb') as f:
             step_vector = pickle.load(f)
 
-    plot_compression_flow(step_vector, filename)
-    
+    plot_compression_flow(step_vector, filename, att_names, C.steps)
     print('done.')
     
 
@@ -269,8 +241,8 @@ if __name__ == '__main__':
     # C.version = 'V-C.0'
     # C.steps = ['net', 'pca'] # , 'umap']
     # C.att_ind = 10
-    use_cache = False
-    save_cache = True
+    C.use_cache = False
+    C.save_cache = True
 
     # models = '-'.join(C.steps)
     # pca_params = '-'.join([str(i) for j in C.pca.items() for i in j])
