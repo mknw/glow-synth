@@ -345,7 +345,7 @@ if __name__ == '__main__':
 
     C = ConfWrap(fn='config/ffhq256lu_c.yml')
     # C = ConfWrap(fn='config/ffhq128_c.yml')
-    # C.resume = True
+    C.resume = True
     C.training.sample_dir = C.training.root_dir + '/samples'
     main(C)
 

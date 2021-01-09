@@ -18,6 +18,7 @@ training:
     batch_size: 8
     n_samples: 64
     n_workers: 8
+    resample: True
 
 pca:
     n_pcs: 5000

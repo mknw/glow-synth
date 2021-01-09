@@ -46,8 +46,10 @@ def main(C, epochs=[160000], save=True):
 
 
 def analyse_synthesizer(C, model_meta_stuff = None):
+    print(f'Analysing synth with\
+            PCA nps:{C.pca.n_pcs}, UMAP dims: {C.umap.n_components}, ko:{C.kept_out}')
+
     device = torch.device("cuda:0" if torch.cuda.is_available() and len(C.net.gpus) > 0 else "cpu")
-    # print("Device: %s" % device)
     
     model_root_fp, model_fp, vmarker_fp = model_meta_stuff
 
@@ -120,7 +122,6 @@ def save_reconstr_v(C, attributes, data=None, data_x=None, reducer=None):
     ''' Save x's and z's, visualized pre (original) 
     and post (reconstructed) dimensionality reduction.'''
 
-    import random 
     # blond vs brown air, smiling vs. wearing hat.
     att_ind = [5, 11, 31, 35]
     ko = '_ko' if C.kept_out else ''
@@ -132,17 +133,16 @@ def save_reconstr_v(C, attributes, data=None, data_x=None, reducer=None):
         # att_ind = list(range(0, 40, 10))
         kept_out_df, kept_out_idcs = attributes.pick_last_n_per_attribute(att_ind, n=4)
         # split dataset
+        import ipdb; ipdb.set_trace()
         z_s = data[kept_out_idcs].copy()
         x_s = data_x[kept_out_idcs].copy()
         att_names = list(kept_out_df.columns)
 
         if C.kept_out:
-            training_data = np.delete(data, kept_out_idcs, axis=0)
+            reducer.fit(np.delete(data, kept_out_idcs, axis=0))
         else:
-            training_data = data.copy()
+            reducer.fit(data)
         del data_x; del data
-        reducer.fit(training_data)
-        del training_data
         # TODO: replace show_steps arguments with argument selection
         red_data = reducer.transform(z_s, show_steps='all')
         # the last element of red(uced)_data is the lower level representation.
@@ -250,5 +250,5 @@ if __name__ == '__main__':
 
     # models = '_'.join([models, pca_params, data_steps])
     # fns = [f'data/test/{models}_{version}_4.png' for version in ['legacy', 'new']]
-
+    import ipdb; ipdb.set_trace()
     main(C)
