@@ -57,17 +57,6 @@ class  Synthesizer(object):
             self.img_size = C.training.img_size
             self.batch = C.training.batch_size
 
-
-
-    def test_compression(self, data, attributes):
-
-        # compr_data = self.transform(data)
-
-        # how do we _render_ the lower-dim. representation?
-        # 1. scatter (PCA combined PCs)
-        # 2. scatter (2d and 3d UMAP)
-        pass
-
     def fit(self, data, skip_l=['net']):
         ''' Main fit method .
         Args: 
@@ -83,6 +72,8 @@ class  Synthesizer(object):
                     data = self.models[step].fit_transform(data)
                 else:
                     self.models[step].fit(data)
+        del data
+        return
 
     def transform(self, data, show_steps='all', skip_l=['net']):
         ''' Main transform method.
@@ -196,6 +187,7 @@ class  Synthesizer(object):
         # partition input data
         # if data.shape[0] > self.batch:
         # 	data.reshape(-1, self.channels, self.img_size, self.img_size)
+        import ipdb; ipdb.set_trace()
 
         with torch.no_grad():
             data = self.models['net'](

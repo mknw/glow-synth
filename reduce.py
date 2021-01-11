@@ -1,14 +1,7 @@
-#!/bin/env /var/scratch/mao540/miniconda3/envs/maip-venv/bin/python
+#!/bin/env /var/scratch/mao540/miniconda3/envs/revive/bin/python
 
 #/var/scratch/mao540/miniconda3/envs/maip-venv/bin/python
-# maybe
-
 import torch 
-
-# from matplotlib.colors import LinearSegmentedColormap
-# from matplotlib.colors import BoundaryNorm as BoundaryNorm
-
-# import util
 import os
 # from mnist_simil import cleanup_version_f
 from config.config import ConfWrap
@@ -17,8 +10,9 @@ from synthesyzer  import Synthesizer
 from utils import ArchError
 from load_data import load_network, Attributes, select_model
 import pickle
-from render import save_dataset_reduction, plot_compression_flow
 import numpy as np
+# Plot analysis:
+# from render import save_dataset_reduction, plot_compression_flow
 
 def main(C, epochs=[160000], save=True):
 
@@ -46,6 +40,7 @@ def main(C, epochs=[160000], save=True):
 
 
 def analyse_synthesizer(C, model_meta_stuff = None):
+    import ipdb; ipdb.set_trace()
     print(f'Analysing synth with\
             PCA nps:{C.pca.n_pcs}, UMAP dims: {C.umap.n_components}, ko:{C.kept_out}')
 
@@ -87,9 +82,9 @@ def analyse_synthesizer(C, model_meta_stuff = None):
 
     C.basename = make_basename(C)
     if C.use_cache:
-        save_reconstr_v(C, attributes)
+        compute_reduction_reupsampling(C, attributes)
     else:
-        save_reconstr_v(C, attributes, data_z, data_x, reducer)
+        compute_reduction_reupsampling(C, attributes, data_z, data_x, reducer)
 
 def make_basename(C, withtime=False):
     time = ''
@@ -117,7 +112,7 @@ def pca_reduction(reducer, data):
         fns = [f'data/test/{i}_{models}_{version}_4.png' for version in ['legacy', 'new']]
         save_dataset_reduction(data_red, var_exp_ratio, attributes, k=10, att_ind=i, filename=fns[1])
 
-def save_reconstr_v(C, attributes, data=None, data_x=None, reducer=None):
+def compute_reduction_reupsampling(C, attributes, data=None, data_x=None, reducer=None):
     
     ''' Save x's and z's, visualized pre (original) 
     and post (reconstructed) dimensionality reduction.'''
@@ -133,7 +128,6 @@ def save_reconstr_v(C, attributes, data=None, data_x=None, reducer=None):
         # att_ind = list(range(0, 40, 10))
         kept_out_df, kept_out_idcs = attributes.pick_last_n_per_attribute(att_ind, n=4)
         # split dataset
-        import ipdb; ipdb.set_trace()
         z_s = data[kept_out_idcs].copy()
         x_s = data_x[kept_out_idcs].copy()
         att_names = list(kept_out_df.columns)
@@ -160,7 +154,7 @@ def save_reconstr_v(C, attributes, data=None, data_x=None, reducer=None):
         with open(cache_fn, 'rb') as f:
             step_vector = pickle.load(f)
 
-    plot_compression_flow(step_vector, filename, att_names, C.steps)
+    # plot_compression_flow(step_vector, filename, att_names, C.steps)
     print('done.')
     
 
@@ -192,7 +186,6 @@ def plot_reduced_dataset(pca, z_s, att, k, att_ind, filename):
 
     # Use subset dataframe turn 1 hot vectors into indices,
     # then add column for "both" categories if overlapping.
-    # import ipdb; ipdb.set_trace()
     color_series, overlapping_attributes = category_from_onehot(sel_att_df)
     # color_series += 2 # make it red
     
@@ -250,5 +243,4 @@ if __name__ == '__main__':
 
     # models = '_'.join([models, pca_params, data_steps])
     # fns = [f'data/test/{models}_{version}_4.png' for version in ['legacy', 'new']]
-    import ipdb; ipdb.set_trace()
     main(C)

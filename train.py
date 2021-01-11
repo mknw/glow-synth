@@ -17,7 +17,7 @@ from model import Glow
 from tqdm import tqdm
 # from train_r import calc_z_shapes
 from shell_util import AverageMeter, bits_per_dim
-from reduce import load_network
+# from load_data import load_network
 
 from config.config import ConfWrap
 from utils import ModelNotFoundError

@@ -557,7 +557,7 @@ def load_network(model_dir, device, conf, checkpoint=True):
         loss_fn = calc_loss
     elif conf.arch in ['densenet', 'resnet']:
         raise NotImplementedError
-
+    torch.cuda.empty_cache()
     net = net.to(device)
     if str(device).startswith('cuda'):
         net = torch.nn.DataParallel(net, conf.gpus)
@@ -649,7 +649,7 @@ class Attributes:
 
             attr_last_idcs[col] = column_idxs
             prev_idcs = prev_idcs | set(column_idxs)
-            prev_idxs_list.append(column_idxs) # lists preserve order.
+            prev_idxs_list.extend(column_idxs) # lists preserve order.
 
         df = pd.DataFrame(attr_last_idcs)
         df.columns = df1.columns

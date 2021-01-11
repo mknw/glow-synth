@@ -1,0 +1,26 @@
+#!/usr/bin/sh
+
+#SBATCH --job-name=synthglow
+#SBATCH --output=/home/mao540/glow-pytorch/synthglow.out
+#SBATCH --time=05:00:00
+#SBATCH -N 1               # nodes
+#SBATCH -n 5               # cores
+#SBATCH --gres=gpu:1
+#SBATCH --nodelist=node052
+
+# not now #SBATCH --constraint=TitanX
+# not now #SBATCH --cpus-per-task=1  # multicpus for umap embeddings
+# not now #SBATCH --gres=gpu:1 # generic resources
+# not needed atm # SBATCH --partition=proq
+
+# Usage: `sbatch <script name>`
+source "$HOME/.bashrc"
+source "/etc/profile.d/modules.sh"
+
+module load cuda10.1
+
+conda activate maip-venv
+
+# echo "$(module list)"
+
+/home/mao540/glow-pytorch/reduce.py

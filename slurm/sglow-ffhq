@@ -1,0 +1,36 @@
+#!/bin/bash
+
+#SBATCH --job-name=ffhq-glow
+#SBATCH --output=/home/mao540/ffhqglow.out
+#SBATCH --error=/home/mao540/ffhqglow.err
+
+#SBATCH --time=24:00:00
+#SBATCH -N 1               # nodes
+#SBATCH -n 5               # cores
+
+#SBATCH --constraint=TitanX-Pascal
+
+
+# not now # SBATCH --gres=
+
+# not now #SBATCH --cpus-per-task=1  # multicpus for umap embeddings
+# not now #SBATCH --gres=gpu:2 # generic resources
+# not needed atm # SBATCH --partition=proq
+
+# Usage:
+# `sbatch <script name>`
+
+# export XDG_RUNTIME_DIR="/home/mao540/.xdg_runtime_dir"
+source "/etc/bashrc"
+source "$HOME/.bashrc"
+source "/etc/profile.d/modules.sh"
+
+conda activate maip-venv
+module load cuda10.1
+
+nvidia-smi
+
+
+# echo "$(module list)"
+
+srun /home/mao540/glow-pytorch/train.py
